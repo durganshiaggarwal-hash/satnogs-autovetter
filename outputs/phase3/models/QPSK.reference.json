@@ -1,0 +1,33 @@
+{
+  "modulation": "QPSK",
+  "trained_at": 1792293387.2282567,
+  "seconds": 7.3,
+  "rows": 85680,
+  "epochs_run": 32,
+  "best_val_loss": 0.002451071748510003,
+  "noise_reference": 0.019837068580415645,
+  "spec": {
+    "snrs_db": [
+      0.0,
+      4.0,
+      8.0,
+      12.0,
+      16.0
+    ],
+    "profiles": [
+      "clean",
+      "doppler",
+      "fading",
+      "full"
+    ],
+    "frames_each": 18,
+    "epochs": 200,
+    "patience": 12,
+    "window": 2,
+    "hidden": [
+      128,
+      128
+    ],
+    "seed": 2
+  }
+}

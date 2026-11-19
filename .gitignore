@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+satrecovery_data/
+.pytest_cache/

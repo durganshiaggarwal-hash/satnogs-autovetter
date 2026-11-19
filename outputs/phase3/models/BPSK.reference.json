@@ -1,0 +1,33 @@
+{
+  "modulation": "BPSK",
+  "trained_at": 1792293379.941368,
+  "seconds": 30.3,
+  "rows": 85680,
+  "epochs_run": 200,
+  "best_val_loss": 2.537896534704487e-06,
+  "noise_reference": 0.01987310876169887,
+  "spec": {
+    "snrs_db": [
+      0.0,
+      4.0,
+      8.0,
+      12.0,
+      16.0
+    ],
+    "profiles": [
+      "clean",
+      "doppler",
+      "fading",
+      "full"
+    ],
+    "frames_each": 18,
+    "epochs": 200,
+    "patience": 12,
+    "window": 2,
+    "hidden": [
+      128,
+      128
+    ],
+    "seed": 2
+  }
+}

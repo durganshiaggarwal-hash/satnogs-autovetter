@@ -1,0 +1,66 @@
+SATELLITE SIGNAL ANALYSER - HOW TO RUN ON A NEW LAPTOP (Windows)
+==================================================================
+
+You need:
+  * Python 3.11 or newer (python.org; tick "Add Python to PATH" when installing)
+  * The RML24 dataset folder (RML24_IQdata, about 20 GB) - copy it from the old laptop
+  * The trained AI files from the old laptop (see step 5)
+
+Run each command one at a time in Command Prompt.
+
+1. Unzip "satnogs-autovetter.zip", for example into C:\Users\<you>\Downloads
+
+2. Go into the project folder:
+     cd "C:\Users\<you>\Downloads\satnogs-autovetter\sat_signal_recovery"
+
+3. Make and switch on a virtual environment:
+     python -m venv .venv
+     .venv\Scripts\activate
+   (You should now see (.venv) at the start of the line.)
+
+4. Install the libraries (takes a few minutes):
+     pip install -r requirements.txt
+   If the laptop has an NVIDIA RTX 50-series GPU, also run:
+     pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+5. Copy the trained AI from the OLD laptop, so you do not have to train again.
+   On the old laptop they are in:
+     sat_signal_recovery\satrecovery_data\models\classifier.pt
+     sat_signal_recovery\satrecovery_data\models\classifier.json
+   Put both files in the SAME place on the new laptop
+   (make the folders satrecovery_data\models if they do not exist).
+
+   No old laptop? Train it again instead (this takes a while; much faster with an NVIDIA GPU):
+     python scripts\train_classifier.py "C:\path\to\RML24_IQdata"
+
+6. Start the app (change the path to where the dataset is):
+     python -m satrecovery.analysis --rml24 "C:\path\to\RML24_IQdata"
+
+   The original receiver-comparison app:
+     python -m satrecovery.gui --rml24 "C:\path\to\RML24_IQdata"
+
+Next time, only steps 2, 3 (just the "activate" line) and 6 are needed.
+
+Without the dataset, the app still opens: the "Simulated signal" and
+"Your own file" tabs work, but "Real signal" and "How good is the AI?" need RML24.
+
+What is new in this version
+---------------------------
+* "Your own file" tab: analyse a signal file you give it. Try the files in the
+  "examples" folder (see examples/README.txt).
+* "Save report (PDF)" under Analyse: saves any analysis as a PDF.
+* "Save as test file" (Real signal and Simulated signal tabs): saves the signal WITH its
+  answer key. Load it in "Your own file" and the AI and every bit are graded.
+  Try examples\test_QPSK_+8dB_250kbaud_doppler600.npz.
+* Test files as two CSV files for Excel: in the save window choose "Two CSV files for Excel",
+  or press "Export as CSV" in "Your own file". To load a pair, choose the _signal.csv;
+  the _bits.csv beside it is found by itself.
+* A warning badge under the AI's answer: Confident, Unsure or Unfamiliar signal, with the
+  reason. "How good is the AI?" shows how many of the AI's mistakes it catches.
+* "History" tab: every analysis is kept; double-click one to open it again.
+* "Many at once" tab: analyse a group of recordings, then save the table for Excel.
+* "Dataset" button (top right): choose the RML24 folder once; the app remembers it.
+  After that, step 6 is just:   python -m satrecovery.analysis
+* "?" button (top right): how to use the app, and the words explained.
+* "Dark" switch (top right): dark colours; remembered.
+* A double-click app (.exe / .app): see BUILD_APP.txt.

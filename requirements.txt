@@ -1,0 +1,25 @@
+# Core science (Phases 1-6)
+numpy>=2.0
+scipy>=1.13
+matplotlib>=3.9
+scikit-learn>=1.5
+
+# Learned receivers (Phases 4-6).
+# On a machine with an NVIDIA GPU, install the CUDA build instead, e.g. for
+# an RTX 50-series card:  pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch>=2.5
+
+# Reading RML24 (Phase 3)
+h5py>=3.10
+
+# Backend (Phase 7)
+fastapi>=0.115
+uvicorn>=0.30
+
+# Desktop application (Phase 8)
+PySide6>=6.7
+pyqtgraph>=0.13
+
+# Tests
+pytest>=8.0
+httpx>=0.27

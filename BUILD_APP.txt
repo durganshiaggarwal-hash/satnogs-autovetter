@@ -1,0 +1,46 @@
+SATELLITE SIGNAL ANALYSER - MAKING THE DOUBLE-CLICK APP
+=======================================================
+
+This turns the analyser into a normal program you open by double-clicking:
+  Windows:  Satellite Signal Analyser.exe
+  Mac:      Satellite Signal Analyser.app
+Nobody needs Python or the terminal to USE it. To BUILD it, you need the
+project set up as in HOW_TO_RUN.txt (or HOW_TO_RUN_MAC.txt), once.
+
+Build the Windows version on a Windows computer, and the Mac version on a Mac.
+
+WINDOWS
+1. Open Command Prompt in the project folder (sat_signal_recovery) and switch on the
+   virtual environment:
+     .venv\Scripts\activate
+2. Build (takes 5 to 15 minutes):
+     packaging\build_app_windows.bat
+3. The app is the folder:
+     dist\Satellite Signal Analyser
+   Inside it, double-click "Satellite Signal Analyser.exe".
+4. Put the trained AI in that folder, at:
+     dist\Satellite Signal Analyser\satrecovery_data\models\classifier.pt
+     dist\Satellite Signal Analyser\satrecovery_data\models\classifier.json
+   (make the folders satrecovery_data\models if they are not there yet).
+5. To move the app to another computer, copy the WHOLE "Satellite Signal Analyser" folder.
+
+MAC
+1. Open Terminal in the project folder and switch on the virtual environment:
+     source .venv/bin/activate
+2. Build:
+     sh packaging/build_app_mac.sh
+3. The app is  dist/Satellite Signal Analyser.app
+4. Put the trained AI next to the .app, at:
+     dist/satrecovery_data/models/classifier.pt
+     dist/satrecovery_data/models/classifier.json
+5. The first time, macOS may say the app is from an unidentified developer:
+   right-click the app, choose Open, then Open again.
+
+GOOD TO KNOW
+* The dataset (RML24_IQdata, 20 GB) is NOT inside the app. In the app, press
+  "Dataset" (top right) and choose the folder once; it is remembered.
+* The app is big: about 1 GB with the normal PyTorch, and 4 to 5 GB if the
+  computer has the NVIDIA (CUDA) version of PyTorch installed, because the
+  GPU libraries are copied in. For a smaller app to share, build it in a
+  virtual environment with the normal PyTorch:  pip install torch
+* The History and the trained AI are kept in "satrecovery_data" next to the app.

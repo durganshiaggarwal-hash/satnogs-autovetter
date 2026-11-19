@@ -1,0 +1,74 @@
+SATELLITE SIGNAL ANALYSER - HOW TO RUN ON A MAC
+================================================
+
+You need:
+  * Python 3.12 (download the macOS installer from python.org and install it)
+  * The RML24 dataset folder (RML24_IQdata, about 20 GB) - copy it from the Windows laptop
+  * The trained AI files from the Windows laptop (see step 5)
+
+Open the Terminal app (press Cmd + Space, type Terminal, press Enter).
+Run each command one at a time.
+
+1. Unzip "satnogs-autovetter.zip" by double-clicking it in your Downloads folder.
+
+2. Go into the project folder:
+     cd ~/Downloads/"satnogs-autovetter"/sat_signal_recovery
+
+3. Make and switch on a virtual environment:
+     python3 -m venv .venv
+     source .venv/bin/activate
+   (You should now see (.venv) at the start of the line.)
+
+4. Install the libraries (takes a few minutes):
+     pip install -r requirements.txt
+   (Ignore the NVIDIA line inside requirements.txt - Macs do not have NVIDIA GPUs.
+    Everything runs on the Mac's processor instead.)
+
+5. Copy the trained AI from the WINDOWS laptop, so you do not have to train again.
+   On Windows they are in:
+     sat_signal_recovery\satrecovery_data\models\classifier.pt
+     sat_signal_recovery\satrecovery_data\models\classifier.json
+   On the Mac, make the folder and put both files in it:
+     mkdir -p satrecovery_data/models
+   then drag classifier.pt and classifier.json into
+     satnogs-autovetter/sat_signal_recovery/satrecovery_data/models
+   (A model trained on the Windows GPU works on the Mac without changes.)
+
+   No Windows laptop? Train it again on the Mac instead (slow, could take hours):
+     python scripts/train_classifier.py ~/Downloads/RML24_IQdata
+
+6. Start the app (change the path if the dataset is somewhere else):
+     python -m satrecovery.analysis --rml24 ~/Downloads/RML24_IQdata
+
+   The original receiver-comparison app:
+     python -m satrecovery.gui --rml24 ~/Downloads/RML24_IQdata
+
+Next time, only steps 2, 3 (just the "source" line) and 6 are needed.
+
+Without the dataset, the app still opens: the "Simulated signal" and
+"Your own file" tabs work, but "Real signal" and "How good is the AI?" need RML24.
+
+What is new in this version
+---------------------------
+* "Your own file" tab: analyse a signal file you give it. Try the files in the
+  "examples" folder (see examples/README.txt).
+* "Save report (PDF)" under Analyse: saves any analysis as a PDF.
+* "Save as test file" (Real signal and Simulated signal tabs): saves the signal WITH its
+  answer key. Load it in "Your own file" and the AI and every bit are graded.
+  Try examples/test_QPSK_+8dB_250kbaud_doppler600.npz.
+* Test files as two CSV files for Excel: in the save window choose "Two CSV files for Excel",
+  or press "Export as CSV" in "Your own file". To load a pair, choose the _signal.csv;
+  the _bits.csv beside it is found by itself.
+* A warning badge under the AI's answer: Confident, Unsure or Unfamiliar signal, with the
+  reason. "How good is the AI?" shows how many of the AI's mistakes it catches.
+* "History" tab: every analysis is kept; double-click one to open it again.
+* "Many at once" tab: analyse a group of recordings, then save the table for Excel.
+* "Dataset" button (top right): choose the RML24 folder once; the app remembers it.
+  After that, step 6 is just:   python -m satrecovery.analysis
+* "?" button (top right): how to use the app, and the words explained.
+* "Dark" switch (top right): dark colours; remembered.
+* A double-click app (.exe / .app): see BUILD_APP.txt.
+
+If the Mac says "python3: command not found", Python is not installed yet - do the
+python.org install first. If a path has spaces in it, put it in quotes, like this:
+     python -m satrecovery.analysis --rml24 "/Users/you/My Files/RML24_IQdata"
