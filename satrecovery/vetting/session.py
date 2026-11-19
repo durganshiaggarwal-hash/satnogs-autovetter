@@ -317,6 +317,11 @@ class VettingSession:
     def cache(self) -> ArtifactCache:
         return self._cache
 
+    @property
+    def all_items(self) -> list[Item]:
+        """Both modes together (read-only use: the home screen's picks)."""
+        return list(self._all)
+
     def count(self, mode: str) -> int:
         return sum(1 for i in self._all if (i.known if mode == "test" else not i.known))
 

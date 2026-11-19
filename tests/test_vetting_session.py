@@ -272,3 +272,44 @@ class TestUnvetted:
                    if i.known)  # auto-vet touched only this mode
         with pytest.raises(ValidationError):
             session.set_mode("everything")
+
+
+class TestMissionWindow:
+    @pytest.fixture()
+    def mission(self, downloaded, qapp):
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        from satrecovery.vetting.gui.mission import MissionWindow
+
+        manifest, cache, root = downloaded
+        session = VettingSession.from_cache(manifest, cache, Policy(0.3, 0.7))
+        win = MissionWindow(session, explainer=None)
+        yield win, session
+        win.close()
+        win.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        qapp.processEvents()
+
+    def test_opens_on_how_it_works_then_home(self, mission):
+        win, _ = mission
+        assert win.stack.currentWidget() is win.intro
+        win.intro.start.emit()
+        assert win.stack.currentWidget() is win.home
+
+    def test_replay_plays_to_a_plain_verdict(self, mission):
+        win, session = mission
+        obs_id = session.ordered()[0].obs.id
+        win.open_replay(obs_id)
+        assert win.stack.currentWidget() is win.replay
+        assert f"#{obs_id}" in win.replay.subtitle.text()
+        assert "Listening" in win.replay.headline.text() or "Working" in win.replay.sentence.text()
+        win.replay.finish()
+        assert win.replay.symbol.text() and "Listening" not in win.replay.headline.text()
+        win.replay.back.emit()
+        assert win.stack.currentWidget() is win.home
+
+    def test_world_map_has_land(self):
+        from satrecovery.vetting.gui.mission import _land
+
+        rings = _land()
+        assert len(rings) > 100 and all(r.shape[1] == 2 for r in rings)

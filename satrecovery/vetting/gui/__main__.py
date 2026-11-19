@@ -18,7 +18,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data", default=str(ROOT / "satrecovery_data" / "satnogs"))
     parser.add_argument("--screenshot", help="save a picture of the window and quit (for the report)")
     parser.add_argument("--no-orbit", action="store_true", help="skip the orbit view (works offline)")
-    parser.add_argument("--select", type=int, help="open on this observation id")
+    parser.add_argument("--select", type=int, help="expert mode: open on this observation id")
+    parser.add_argument("--expert", action="store_true", help="open the vetting station (expert mode) directly")
+    parser.add_argument("--replay", type=int, help="open the replay of this observation")
+    parser.add_argument("--screen", choices=("intro", "home"), help="open on this screen (default: intro)")
     args = parser.parse_args(argv)
 
     from PySide6.QtCore import QTimer
@@ -52,13 +55,27 @@ def main(argv: list[str] | None = None) -> int:
 
         cache = ArtifactCache(data)
         explainer = TrackExplainer(cache, SatnogsCatalog(data), StationDirectory(data))
-    window = VettingWindow(session, explainer)
-    window.show()
-    if args.select:
-        window.select(args.select)
+    if args.expert or args.select:
+        window = VettingWindow(session, explainer)
+        window.show()
+        if args.select:
+            window.select(args.select)
+    else:
+        from .mission import MissionWindow
+
+        window = MissionWindow(session, explainer, show_intro=args.screen != "home")
+        window.show()
+        if args.replay:
+            window.open_replay(args.replay)
     if args.screenshot:
         def capture() -> None:
-            window.orbit.wait()
+            from PySide6.QtCore import QThreadPool
+
+            QThreadPool.globalInstance().waitForDone(30000)
+            app.processEvents()
+            if hasattr(window, "replay") and args.replay:
+                window.replay.finish()
+            app.processEvents()
             app.processEvents()
             window.grab().save(args.screenshot)
             print(f"Saved {args.screenshot}")

@@ -417,6 +417,14 @@ class TrackExplainer:
     def __init__(self, cache, catalog: SatnogsCatalog, stations: StationDirectory) -> None:
         self._cache, self._catalog, self._stations = cache, catalog, stations
 
+    @property
+    def catalog(self) -> SatnogsCatalog:
+        return self._catalog
+
+    @property
+    def stations(self) -> StationDirectory:
+        return self._stations
+
     def explain(self, obs: Observation, power: np.ndarray, fit_timing: bool = True) -> TrackExplanation:
         """``power``: the normalised, clipped waterfall (time, freq) as the window draws it."""
         from .session import track_points
@@ -463,3 +471,39 @@ class TrackExplainer:
             return f"Track is {certainty}ground interference, not a satellite", \
                    detail + " A fixed transmitter traces the mirror of the satellite's Doppler.", "ground"
         return f"Track is {certainty}{best.curve.name}, not the scheduled satellite", detail, "other"
+
+
+# ----------------------------------------------------------------------
+EARTH_RADIUS_KM = 6371.0
+
+
+@dataclass(frozen=True)
+class GroundTrack:
+    """Where a satellite is over the Earth during (and around) a pass.
+
+    ``footprint_deg`` is the angular radius of the area that can see it at
+    all: from the satellite's height, ``arccos(R / (R + h))``.  A station
+    inside that circle has the satellite above its horizon.
+    """
+
+    seconds: np.ndarray = field(repr=False)     # since the observation started
+    lat: np.ndarray = field(repr=False)
+    lon: np.ndarray = field(repr=False)
+    height_km: np.ndarray = field(repr=False)
+    elevation: np.ndarray = field(repr=False)   # as seen from the station
+    footprint_deg: np.ndarray = field(repr=False)
+
+
+def ground_track(tle: tuple[str, str], site: Site, start: datetime, seconds: np.ndarray) -> GroundTrack:
+    from skyfield.api import EarthSatellite, wgs84
+
+    ts = _timescale()
+    satellite = EarthSatellite(tle[0], tle[1], ts=ts)
+    t = ts.from_datetimes([start + timedelta(seconds=float(s)) for s in seconds])
+    where = satellite.at(t)
+    below = wgs84.subpoint_of(where)
+    height = np.atleast_1d(wgs84.height_of(where).km)
+    _, elevation, _ = look(tle, site, [start + timedelta(seconds=float(s)) for s in seconds])
+    footprint = np.degrees(np.arccos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + np.maximum(height, 1.0))))
+    return GroundTrack(np.asarray(seconds, float), np.atleast_1d(below.latitude.degrees),
+                       np.atleast_1d(below.longitude.degrees), height, elevation, footprint)
