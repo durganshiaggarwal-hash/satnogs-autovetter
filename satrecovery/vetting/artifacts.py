@@ -12,6 +12,7 @@ an interrupted download never leaves a half file that looks finished.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ..core.exceptions import SatRecoveryError
@@ -61,6 +62,44 @@ class ArtifactCache:
         part.replace(target)
         return target
 
+    def axes_path(self, obs: Observation | int) -> Path:
+        return self._root / "axes" / f"{int(getattr(obs, 'id', obs))}.json"
+
+    def _save_axes(self, obs: Observation, png: Path) -> None:
+        """Read the picture's kHz/seconds scales; a failure is saved too, so it is not retried."""
+        from .axes import AxisReadError, read_axes_png
+
+        path = self.axes_path(obs)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            record = {"ok": True, **read_axes_png(png).to_dict()}
+        except (AxisReadError, WaterfallDecodeError) as error:
+            record = {"ok": False, "reason": str(error)}
+        path.write_text(json.dumps(record), encoding="utf-8")
+
+    def axes(self, obs: Observation, download: bool = True):
+        """The waterfall's :class:`~satrecovery.vetting.axes.WaterfallAxes`, or ``None`` if unreadable.
+
+        Waterfalls downloaded before the axes were read have only the decoded
+        numbers left, so with ``download`` the picture is fetched once more.
+        """
+        from .axes import WaterfallAxes
+
+        path = self.axes_path(obs)
+        if not path.exists():
+            if not download or not obs.waterfall_url:
+                return None
+            png = self._download(obs.waterfall_url, self._root / "png" / f"{obs.id}.axes.png")
+            try:
+                self._save_axes(obs, png)
+            finally:
+                if not self._keep_png:
+                    png.unlink(missing_ok=True)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not record.get("ok"):
+            return None
+        return WaterfallAxes(record["khz_left"], record["khz_right"], record["seconds_bottom"], record["seconds_top"])
+
     def waterfall(self, obs: Observation) -> WaterfallImage:
         """The decoded waterfall, downloading it the first time."""
         path = self.waterfall_path(obs)
@@ -71,6 +110,7 @@ class ArtifactCache:
         png = self._download(obs.waterfall_url, self._root / "png" / f"{obs.id}.png")
         try:
             image = WaterfallImage.from_png(png).resized(*self._bins)
+            self._save_axes(obs, png)
         except WaterfallDecodeError as error:
             raise ArtifactError(f"observation {obs.id}: {error}") from error
         finally:

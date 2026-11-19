@@ -81,6 +81,11 @@ class Observation:
     waterfall_url: str | None
     audio_url: str | None
     tle: tuple[str, str] | None = field(default=None, compare=False)
+    # Where the station is (degrees, metres).  Missing in manifests written
+    # before November 2026; StationDirectory fills them in.
+    station_lat: float | None = None
+    station_lng: float | None = None
+    station_alt: float | None = None
 
     def __post_init__(self) -> None:
         if self.id <= 0:
@@ -112,6 +117,9 @@ class Observation:
             waterfall_url=row.get("waterfall") or None,
             audio_url=row.get("payload") or None,
             tle=tle,
+            station_lat=row.get("station_lat"),
+            station_lng=row.get("station_lng"),
+            station_alt=row.get("station_alt"),
         )
 
     # ------------------------------------------------------------------
