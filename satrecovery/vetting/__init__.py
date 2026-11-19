@@ -29,8 +29,12 @@ from .source import (
     UrllibTransport,
 )
 from .waterfall import WaterfallDecodeError, WaterfallImage
+from .dataset import NO_SIGNAL, SIGNAL, StationSplit, TimeSplit, VettingSet, VettingSplit, normalise
+from .model import WaterfallVetter
 
 __all__ = [
+    "WaterfallVetter",
+    "NO_SIGNAL", "SIGNAL", "StationSplit", "TimeSplit", "VettingSet", "VettingSplit", "normalise",
     "ArtifactCache", "ArtifactError", "Manifest", "ManifestSource", "Observation", "ObservationQuery",
     "ObservationSource", "Response", "SatnogsApiSource", "SatnogsError", "Transport", "UrllibTransport",
     "WaterfallDecodeError", "WaterfallImage", "WaterfallLabel",
