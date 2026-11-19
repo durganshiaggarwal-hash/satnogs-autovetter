@@ -69,12 +69,36 @@ TOLERANCE = 0.03
 COVERAGE = 0.9
 
 
+_TABLE: tuple[np.ndarray, np.ndarray] | None = None
+LEVELS = 128   # colours are matched on a 128-level-per-channel grid
+
+
+def _colour_table() -> tuple[np.ndarray, np.ndarray]:
+    """For every colour on the grid: its nearest viridis index and how far from viridis it is.
+
+    Worked out once (about a second); after that a picture is decoded by
+    looking its pixels up, instead of searching a tree for each of 1.3
+    million pixels -- which also held Python's lock, so parallel downloads
+    queued behind one another.
+    """
+    global _TABLE
+    if _TABLE is None:
+        _, tree = _colour_map()
+        steps = (np.arange(LEVELS, dtype=np.float32) + 0.5) / LEVELS
+        grid = np.stack(np.meshgrid(steps, steps, steps, indexing="ij"), axis=-1).reshape(-1, 3)
+        distance, index = tree.query(grid, k=1)
+        _TABLE = (index.astype(np.uint8).reshape(LEVELS, LEVELS, LEVELS),
+                  distance.astype(np.float32).reshape(LEVELS, LEVELS, LEVELS))
+    return _TABLE
+
+
 def _locate(rgb: np.ndarray) -> tuple[int, int, int, int, np.ndarray]:
     """``(row0, row1, col0, col1, colour-map index of every pixel)`` of the plot."""
-    _, tree = _colour_map()
+    table_index, table_distance = _colour_table()
     height, width, _ = rgb.shape
-    distance, index = tree.query(rgb.reshape(-1, 3), k=1)
-    on_map = (distance < TOLERANCE).reshape(height, width)
+    q = np.clip((np.asarray(rgb, dtype=np.float32) * LEVELS).astype(np.int32), 0, LEVELS - 1)
+    index = table_index[q[..., 0], q[..., 1], q[..., 2]]
+    on_map = table_distance[q[..., 0], q[..., 1], q[..., 2]] < TOLERANCE
 
     # Columns first, judged against the best column: margins above and
     # below the plot differ between pictures, so no fixed share works.
@@ -87,7 +111,7 @@ def _locate(rgb: np.ndarray) -> tuple[int, int, int, int, np.ndarray]:
     row0, row1 = _longest_run(on_map[:, col0:col1].mean(axis=1) > COVERAGE)
     if row1 - row0 < 16:
         raise WaterfallDecodeError("no plot area found (no tall block of viridis colours)")
-    return row0, row1, col0, col1, index.reshape(height, width)
+    return row0, row1, col0, col1, index
 
 
 def locate_plot(rgb: np.ndarray) -> tuple[int, int, int, int]:

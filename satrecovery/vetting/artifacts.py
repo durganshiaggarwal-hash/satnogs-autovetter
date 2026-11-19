@@ -50,8 +50,19 @@ class ArtifactCache:
         return self.waterfall_path(obs).exists()
 
     # ------------------------------------------------------------------
-    def _download(self, url: str, target: Path) -> Path:
-        response = self._transport.get(url, timeout=120.0)
+    def _download(self, url: str, target: Path, tries: int = 3) -> Path:
+        from .source import SatnogsError
+
+        for attempt in range(tries):
+            try:
+                response = self._transport.get(url, timeout=120.0)
+                break
+            except SatnogsError:
+                if attempt == tries - 1:
+                    raise
+                import time
+
+                time.sleep(2.0 * (attempt + 1))  # a reset connection usually works on the next try
         if response.status != 200:
             raise ArtifactError(f"{target.name}: server answered {response.status}")
         if len(response.body) > self.MAX_BYTES:

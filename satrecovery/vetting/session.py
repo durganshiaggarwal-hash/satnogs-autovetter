@@ -103,6 +103,23 @@ class Explainer:
         weights = importances or {name: 1.0 for name in FEATURES}
         self._weights = np.array([weights.get(name, 0.0) for name in FEATURES], dtype=np.float32)
 
+    def to_arrays(self) -> dict[str, np.ndarray]:
+        return {"typical_signal": self._typical_signal, "typical_none": self._typical_none,
+                "spread": self._spread, "weights": self._weights}
+
+    @classmethod
+    def from_arrays(cls, arrays) -> "Explainer":
+        """Rebuild from :meth:`to_arrays` without the training data."""
+        explainer = cls.__new__(cls)
+        explainer._typical_signal = np.asarray(arrays["typical_signal"], dtype=np.float32)
+        explainer._typical_none = np.asarray(arrays["typical_none"], dtype=np.float32)
+        explainer._spread = np.asarray(arrays["spread"], dtype=np.float32)
+        explainer._weights = np.asarray(arrays["weights"], dtype=np.float32)
+        if any(len(a) != len(FEATURES) for a in (explainer._typical_signal, explainer._typical_none,
+                                                  explainer._spread, explainer._weights)):
+            raise ValidationError("explainer", "arrays", f"each needs {len(FEATURES)} values")
+        return explainer
+
     @staticmethod
     def _show(name: str, value: float) -> str:
         return f"{value:.0%}" if name in SHARES else f"{value:.2f}"
@@ -270,9 +287,14 @@ class VettingSession:
     MODES = ("unvetted", "test")
 
     def __init__(self, items: Sequence[Item], cache: ArtifactCache, explainer: Explainer,
-                 policy: Policy = Policy(), log: DecisionLog | None = None, model_name: str = "") -> None:
-        if not items:
+                 policy: Policy = Policy(), log: DecisionLog | None = None, model_name: str = "",
+                 model: FeatureVetter | None = None, bundle=None) -> None:
+        if not items and bundle is None:
             raise ValidationError("items", 0, "nothing to vet")
+        self._model = model
+        self._bundle = bundle
+        # From a saved bundle there is no test set on disk: one queue, "latest".
+        self.modes = ("latest",) if bundle is not None else self.MODES
         self._all = list(items)
         self._by_id = {item.obs.id: item for item in self._all}
         self._cache = cache
@@ -282,7 +304,10 @@ class VettingSession:
         self._log = log if log is not None else DecisionLog(None)
         self.model_name = model_name
         self.policy = policy
-        self.mode = "unvetted" if self.count("unvetted") else "test"
+        if bundle is not None:
+            self.mode = "latest"
+        else:
+            self.mode = "unvetted" if self.count("unvetted") else "test"
 
     # ------------------------------------------------------------------
     @classmethod
@@ -310,7 +335,31 @@ class VettingSession:
                       for o, p, f in zip(fresh_kept, fresh_p, fresh_features)]
         return cls(items, cache, explainer, policy, DecisionLog(log_path),
                    model_name=f"Forest on {len(FEATURES)} measurements, trained on {len(kept)} volunteer-checked "
-                              f"observations")
+                              f"observations", model=model)
+
+    @classmethod
+    def from_bundle(cls, bundle, observations: Iterable[Observation], cache: ArtifactCache,
+                    policy: Policy = Policy(), log_path: str | Path | None = None, progress=None) -> "VettingSession":
+        """The app's normal start: a saved, trained vetter and whatever recordings are at hand."""
+        session = cls([], cache, bundle.explainer, policy, DecisionLog(log_path),
+                      model_name=f"Forest on {len(FEATURES)} measurements, trained on {bundle.n_train:,} "
+                                 f"volunteer-checked observations", model=bundle.model, bundle=bundle)
+        session.add(list(observations), progress)
+        return session
+
+    def add(self, observations: Sequence[Observation], progress=None) -> list[Item]:
+        """Score new recordings and put them in the queue; returns the ones added."""
+        if self._model is None:
+            raise ValidationError("model", None, "this session has no model to score new recordings with")
+        fresh = [o for o in observations if o.id not in self._by_id]
+        kept, features = FeatureStore(self._cache).get(fresh, progress)
+        if not kept:
+            return []
+        probability = self._model.predict_proba_features(features)
+        items = [Item(o, float(p), self.policy.verdict(float(p)), f) for o, p, f in zip(kept, probability, features)]
+        self._all.extend(items)
+        self._by_id.update({i.obs.id: i for i in items})
+        return items
 
     # ------------------------------------------------------------------
     @property
@@ -323,15 +372,19 @@ class VettingSession:
         return list(self._all)
 
     def count(self, mode: str) -> int:
+        if mode == "latest":
+            return len(self._all)
         return sum(1 for i in self._all if (i.known if mode == "test" else not i.known))
 
     def set_mode(self, mode: str) -> None:
-        if mode not in self.MODES:
-            raise ValidationError("mode", mode, f"one of {self.MODES}")
+        if mode not in self.modes:
+            raise ValidationError("mode", mode, f"one of {self.modes}")
         self.mode = mode
 
     @property
     def _items(self) -> list[Item]:
+        if self.mode == "latest":
+            return list(self._all)
         test = self.mode == "test"
         return [i for i in self._all if i.known == test]
 
@@ -395,6 +448,8 @@ class VettingSession:
 
     def measured_error(self) -> tuple[float, int]:
         """``(share wrong, how many)`` of confident answers on the volunteer-checked set, at this policy."""
+        if self._bundle is not None:
+            return self._bundle.measured_error(self.policy)
         known = [i for i in self._all if i.known and i.verdict is not Verdict.UNSURE]
         wrong = sum(i.verdict.label is not i.obs.waterfall_label for i in known)
         return (wrong / len(known) if known else float("nan")), len(known)

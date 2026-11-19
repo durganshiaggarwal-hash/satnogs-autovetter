@@ -134,7 +134,7 @@ class VettingWindow(QMainWindow):
 
         # Which queue: the real work, or the test set that measures the model.
         self.mode_buttons = {}
-        for mode in VettingSession.MODES:
+        for mode in self._session.modes:
             button = QPushButton()
             button.setCheckable(True)
             button.clicked.connect(lambda _=False, m=mode: self._set_mode(m))
@@ -338,13 +338,18 @@ class VettingWindow(QMainWindow):
 
     def _update_mode(self) -> None:
         for mode, button in self.mode_buttons.items():
-            title = "UNVETTED" if mode == "unvetted" else "TEST SET"
+            title = {"unvetted": "UNVETTED", "test": "TEST SET", "latest": "LATEST"}[mode]
             button.setText(f"{title} · {self._session.count(mode)}")
             button.setChecked(mode == self._session.mode)
             button.setObjectName("primary" if mode == self._session.mode else "")
             button.style().unpolish(button)
             button.style().polish(button)
-        if self._session.mode == "unvetted":
+        if self._session.mode == "latest":
+            self.banner.setText(
+                f"<span style='color:{theme.ACCENT}'>LIVE</span>&nbsp;&nbsp;The newest recordings from SatNOGS, "
+                f"most of them not checked by any volunteer yet.  Your decisions are saved on this computer only; "
+                f"nothing is sent to SatNOGS.")
+        elif self._session.mode == "unvetted":
             self.banner.setText(
                 f"<span style='color:{theme.ACCENT}'>REAL WORK</span>&nbsp;&nbsp;No volunteer has checked these on "
                 f"SatNOGS, so the verdicts here are new information.  Your decisions are saved on this computer only; "
@@ -465,6 +470,18 @@ class VettingWindow(QMainWindow):
     def _open_satnogs(self) -> None:
         if self._current is not None:
             QDesktopServices.openUrl(QUrl(SATNOGS_OBSERVATION.format(self._current)))
+
+    def refresh_queue(self) -> None:
+        """New recordings arrived: rebuild the list, keeping the current selection."""
+        current = self._current
+        self.model.set_order(self.order.currentText())
+        self._update_mode()
+        self._refresh_counts()
+        row = self.model.row_of(current) if current is not None else 0
+        if row >= 0:
+            self.table.blockSignals(True)
+            self.table.selectRow(row)
+            self.table.blockSignals(False)
 
     def select(self, obs_id: int) -> None:
         """Open a given observation, switching mode if needed."""

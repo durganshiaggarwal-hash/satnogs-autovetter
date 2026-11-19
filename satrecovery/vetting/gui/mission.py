@@ -725,129 +725,261 @@ class IntroScreen(QWidget):
         outer.addLayout(row)
 
 
+class RecordingCard(QPushButton):
+    """One recording on the home screen: the model's mark, the satellite, the station, how long ago."""
+
+    def __init__(self, item: Item, title: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("quiet")
+        self.setMinimumHeight(96)
+        self.setMinimumWidth(250)
+        obs = item.obs
+        self.obs_id = obs.id
+        mark, colour = {Verdict.SIGNAL: ("✔ heard", theme.SIGNAL), Verdict.NO_SIGNAL: ("✖ nothing heard", theme.NO_SIGNAL)
+                        }.get(item.verdict, ("? unsure", theme.UNSURE))
+        ago = ""
+        if obs.end is not None:
+            from datetime import datetime, timezone
+
+            minutes = (datetime.now(timezone.utc) - obs.end).total_seconds() / 60
+            ago = f"{minutes:.0f} min ago" if minutes < 120 else f"{minutes / 60:.0f} h ago"
+        first = title or f"{mark}"
+        self.setText(f"{first}\nNORAD {obs.norad_cat_id} · {obs.transmitter_mode or '?'}\n"
+                     f"{(obs.station_name or '')[:26]}  {ago}")
+        self.setStyleSheet(f"text-align: left; padding: 12px 14px; font-size: 12px; color: {SOFT};"
+                           f"border-left: 3px solid {colour};")
+
+
 class HomeScreen(QWidget):
     replay = Signal(int)
     expert = Signal()
     intro = Signal()
+    refresh_requested = Signal()
+    back = Signal()
 
-    def __init__(self, session: VettingSession, parent=None) -> None:
+    SHOWN = 8
+
+    def __init__(self, session: VettingSession, showcase: tuple = (), parent=None) -> None:
         super().__init__(parent)
         self._session = session
+        self._showcase = tuple(showcase)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(60, 44, 60, 40)
+        outer.setContentsMargins(60, 36, 60, 32)
         outer.setSpacing(10)
         top = QHBoxLayout()
-        top.addWidget(label("Satellite pass checker", "hero"), 1)
-        how = QPushButton("How it works")
-        how.setObjectName("quiet")
-        how.clicked.connect(self.intro.emit)
-        top.addWidget(how)
-        expert = QPushButton("Expert mode  →")
-        expert.setObjectName("quiet")
-        expert.clicked.connect(self.expert.emit)
-        top.addWidget(expert)
+        back = QPushButton("←")
+        back.setObjectName("quiet")
+        back.clicked.connect(self.back.emit)
+        top.addWidget(back)
+        top.addWidget(label("Live satellites", "hero"), 1)
+        for text, signal in (("How it works", self.intro), ("Expert mode  →", self.expert)):
+            button = QPushButton(text)
+            button.setObjectName("quiet")
+            button.clicked.connect(signal.emit)
+            top.addWidget(button)
         outer.addLayout(top)
-        outer.addWidget(label("Real recordings from the SatNOGS network of volunteer ground stations.", "lead"))
-        outer.addSpacing(26)
+        outer.addWidget(label("The newest recordings from the SatNOGS network of volunteer ground stations, "
+                              "checked as they arrive.", "lead"))
+        outer.addSpacing(18)
 
-        stats = QHBoxLayout()
-        stats.setSpacing(20)
-        for value, text in self._numbers():
+        self._stats = QHBoxLayout()
+        self._stats.setSpacing(20)
+        self._stat_labels = []
+        for _ in range(3):
             card = QFrame()
             card.setObjectName("card")
             inside = QVBoxLayout(card)
-            inside.setContentsMargins(22, 18, 22, 18)
-            inside.addWidget(label(value, "stat"))
-            inside.addWidget(label(text, "body"))
-            stats.addWidget(card)
-        outer.addLayout(stats)
-        outer.addSpacing(26)
-        outer.addWidget(label("Watch a pass", "h2"))
-        outer.addWidget(label("Each one plays back the satellite's flight and the recording, then says what was "
-                              "heard.", "body"))
-        cards = QHBoxLayout()
-        cards.setSpacing(20)
-        for obs_id, title, text in self._featured():
-            card = QPushButton()
-            card.setObjectName("quiet")
-            card.setMinimumHeight(150)
-            card.setText(f"{title}\n\n{text}")
-            card.setStyleSheet("text-align: left; padding: 16px; font-size: 13px;")
-            card.clicked.connect(lambda _=False, i=obs_id: self.replay.emit(i))
-            cards.addWidget(card)
-        outer.addLayout(cards)
+            inside.setContentsMargins(22, 16, 22, 16)
+            value, text = label("–", "stat"), label("", "body")
+            inside.addWidget(value)
+            inside.addWidget(text)
+            self._stat_labels.append((value, text))
+            self._stats.addWidget(card)
+        outer.addLayout(self._stats)
+        outer.addSpacing(18)
+
+        heading = QHBoxLayout()
+        heading.addWidget(label("Latest recordings", "h2"), 1)
+        self.feed_status = label("", "body", wrap=False)
+        heading.addWidget(self.feed_status)
+        refresh = QPushButton("↻  Fetch newest")
+        refresh.setObjectName("quiet")
+        refresh.clicked.connect(self.refresh_requested.emit)
+        heading.addWidget(refresh)
+        outer.addLayout(heading)
+        self._latest = QGridLayout()
+        self._latest.setSpacing(14)
+        outer.addLayout(self._latest)
+        outer.addSpacing(14)
+        outer.addWidget(label("Explained by the physics", "h2"))
+        self._examples = QHBoxLayout()
+        self._examples.setSpacing(14)
+        outer.addLayout(self._examples)
         outer.addStretch(1)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        random_one = QPushButton("Replay a recording nobody has checked  →")
-        random_one.setObjectName("big")
-        random_one.clicked.connect(self._random)
-        row.addWidget(random_one)
-        outer.addLayout(row)
+        self.refresh()
 
-    def _numbers(self) -> list[tuple[str, str]]:
+    def set_status(self, text: str) -> None:
+        self.feed_status.setText(text[:90])
+
+    def refresh(self) -> None:
         session = self._session
-        unvetted = session.count("unvetted")
-        mode = session.mode
-        session.set_mode("unvetted" if unvetted else "test")
-        stats = session.stats()
-        session.set_mode(mode)
+        showcase_ids = {o.id for o in self._showcase}
+        latest = sorted((i for i in session.all_items if i.obs.id not in showcase_ids),
+                        key=lambda i: i.obs.start.timestamp() if i.obs.start else 0, reverse=True)
+        sure = sum(i.verdict is not Verdict.UNSURE for i in latest)
+        unchecked = sum(not i.known for i in latest)
         error, measured = session.measured_error()
-        return [
-            (f"{unvetted:,}", "recordings here that no volunteer has checked yet"),
-            (f"{stats['automatable_share']:.0%}", "of them the AI is sure enough to check on its own"),
+        numbers = [
+            (f"{len(latest)}", f"latest recordings loaded · {unchecked} not checked by any volunteer"),
+            (f"{sure / len(latest):.0%}" if latest else "–", "of them the AI is sure enough to check on its own"),
             (f"{1 - error:.0%}" if error == error else "–",
-             f"right when it is sure, tested on {measured:,} recordings volunteers had checked"),
+             f"right when it is sure, tested on {measured:,} confident answers on recordings volunteers had checked"),
         ]
+        for (value, text), (v, t) in zip(self._stat_labels, numbers):
+            value.setText(v)
+            text.setText(t)
+        self._fill(self._latest, [RecordingCard(i) for i in latest[:self.SHOWN]], columns=4,
+                   empty="Recordings appear here as they download.")
+        titles = {15489000: "Not a satellite at all", 15490378: "The wrong satellite"}
+        examples = [RecordingCard(session.item(o.id), titles.get(o.id)) for o in self._showcase
+                    if o.id in {i.obs.id for i in session.all_items}]
+        self._fill(self._examples, examples, empty="")
 
-    def _featured(self) -> list[tuple[int, str, str]]:
-        """A clear 'heard', a clear 'not heard', and one where physics names the source, if present."""
-        session = self._session
-        everything = session.all_items
-        unvetted = [i for i in everything if not i.known]
-        pool = unvetted or everything
-        picks: list[tuple[int, str, str]] = []
-        heard = max(pool, key=lambda i: i.probability, default=None)
-        if heard is not None:
-            picks.append((heard.obs.id, "A clear signal", f"#{heard.obs.id} · {heard.obs.transmitter_mode or '?'}"))
-        silent = min(pool, key=lambda i: i.probability, default=None)
-        if silent is not None and silent is not heard:
-            picks.append((silent.obs.id, "Only noise", f"#{silent.obs.id} · {silent.obs.transmitter_mode or '?'}"))
-        for obs_id, title in ((15489000, "Not a satellite at all"), (15490378, "The wrong satellite")):
-            if any(i.obs.id == obs_id for i in everything):
-                picks.append((obs_id, title, f"#{obs_id} · the physics finds the real source"))
-        return picks[:4]
+    def _fill(self, layout, cards, columns: int = 0, empty: str = "") -> None:
+        while layout.count():
+            widget = layout.takeAt(0).widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not cards and empty:
+            layout.addWidget(label(empty, "body"), 0, 0) if columns else layout.addWidget(label(empty, "body"))
+            return
+        for n, card in enumerate(cards):
+            card.clicked.connect(lambda _=False, i=card.obs_id: self.replay.emit(i))
+            if columns:
+                layout.addWidget(card, n // columns, n % columns)
+            else:
+                layout.addWidget(card)
+        if not columns:
+            layout.addStretch(1)
 
-    def _random(self) -> None:
-        pool = [i for i in self._session.all_items if not i.known] or self._session.all_items
-        if pool:
-            self.replay.emit(pool[np.random.default_rng().integers(len(pool))].obs.id)
+
+class LauncherScreen(QWidget):
+    """The front door: the two halves of the project."""
+
+    lab = Signal()
+    live = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(60, 60, 60, 50)
+        outer.addWidget(label("Satellite Signal Analyser", "hero"))
+        outer.addWidget(label("Identifying and recovering satellite signals with AI: first on a lab dataset, "
+                              "then on a live network of real ground stations.", "lead"))
+        outer.addSpacing(40)
+        doors = QHBoxLayout()
+        doors.setSpacing(28)
+        for title, text, details, signal, kind in (
+            ("Lab analysis", "What kind of signal is it, and what message does it carry?",
+             "RML24: 1.3 million recordings from a satellite test bench.  The AI names the signal type, the "
+             "receiver cleans the signal and recovers the bits, step by step.", self.lab, "check"),
+            ("Live satellites", "Did the station really hear the satellite, and if not, what did it hear?",
+             "SatNOGS: real passes recorded minutes ago by volunteer stations worldwide.  The AI checks each one; "
+             "orbit physics names the source of every signal.", self.live, "confirm"),
+        ):
+            card = QFrame()
+            card.setObjectName("card")
+            inside = QVBoxLayout(card)
+            inside.setContentsMargins(26, 24, 26, 24)
+            inside.addWidget(Step(kind))
+            inside.addWidget(label(title, "hero"))
+            inside.addWidget(label(text, "h2"))
+            inside.addWidget(label(details, "body"))
+            inside.addStretch(1)
+            go = QPushButton(f"Open {title.lower()}  →")
+            go.setObjectName("big")
+            go.clicked.connect(signal.emit)
+            inside.addWidget(go)
+            doors.addWidget(card)
+        outer.addLayout(doors)
+        outer.addStretch(1)
 
 
 class MissionWindow(QMainWindow):
-    """The app's front door: how it works, home, replay; expert mode on request."""
+    """The app: the launcher, the live half (how it works, home, replay) and expert mode on request."""
 
-    def __init__(self, session: VettingSession, explainer=None, show_intro: bool = True) -> None:
+    def __init__(self, session: VettingSession, explainer=None, show_intro: bool = True, feed=None,
+                 showcase: tuple = (), start: str = "launcher") -> None:
         super().__init__()
-        self._session, self._explainer = session, explainer
+        self._session, self._explainer, self._feed = session, explainer, feed
         self._expert = None
-        self.setWindowTitle("Satellite pass checker")
+        self._lab_process = None
+        self.setWindowTitle("Satellite Signal Analyser")
         self.resize(1440, 880)
         self.setStyleSheet(STYLE)
         self.stack = QStackedWidget()
+        self.launcher = LauncherScreen()
         self.intro = IntroScreen()
-        self.home = HomeScreen(session)
+        self.home = HomeScreen(session, showcase)
         self.replay = ReplayScreen(session, explainer)
-        for screen in (self.intro, self.home, self.replay):
+        for screen in (self.launcher, self.intro, self.home, self.replay):
             self.stack.addWidget(screen)
         self.setCentralWidget(self.stack)
+        self._seen_intro = not show_intro
+        self.launcher.live.connect(self.open_live)
+        self.launcher.lab.connect(self.open_lab)
         self.intro.start.connect(lambda: self.stack.setCurrentWidget(self.home))
         self.home.intro.connect(lambda: self.stack.setCurrentWidget(self.intro))
+        self.home.back.connect(lambda: self.stack.setCurrentWidget(self.launcher))
         self.home.replay.connect(self.open_replay)
         self.home.expert.connect(lambda: self.open_expert(None))
+        self.home.refresh_requested.connect(self.fetch_newest)
         self.replay.back.connect(lambda: self.stack.setCurrentWidget(self.home))
         self.replay.expert.connect(self.open_expert)
-        self.stack.setCurrentWidget(self.intro if show_intro else self.home)
+
+        # New recordings from the feed: score them, then redraw at most a few times a second.
+        self._redraw = QTimer(self)
+        self._redraw.setSingleShot(True)
+        self._redraw.setInterval(400)
+        self._redraw.timeout.connect(self._redraw_lists)
+        if feed is not None:
+            feed.arrived.connect(self._arrived)
+            feed.status.connect(self.home.set_status)
+            feed.finished.connect(lambda n: self.home.set_status(f"Up to date · {n} recordings checked just now"))
+
+        screens = {"launcher": self.launcher, "intro": self.intro, "home": self.home}
+        self.stack.setCurrentWidget(screens.get(start, self.launcher))
+
+    # ------------------------------------------------------------------
+    def open_live(self) -> None:
+        self.stack.setCurrentWidget(self.home if self._seen_intro else self.intro)
+        self._seen_intro = True
+
+    def open_lab(self) -> None:
+        """The original Lab analyser (RML24), as its own window."""
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parents[3]
+        if self._lab_process is None or self._lab_process.poll() is not None:
+            self._lab_process = subprocess.Popen([sys.executable, "-m", "satrecovery.analysis"], cwd=str(root))
+
+    def fetch_newest(self) -> None:
+        if self._feed is not None:
+            self._feed.start()
+
+    def _arrived(self, obs) -> None:
+        try:
+            self._session.add([obs])
+        except (OSError, ValueError) as error:
+            self.home.set_status(f"Could not read {obs.id}: {error}")
+            return
+        self._redraw.start()
+
+    def _redraw_lists(self) -> None:
+        self.home.refresh()
+        if self._expert is not None:
+            self._expert.refresh_queue()
 
     def open_replay(self, obs_id: int) -> None:
         self.stack.setCurrentWidget(self.replay)

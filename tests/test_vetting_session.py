@@ -290,10 +290,15 @@ class TestMissionWindow:
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         qapp.processEvents()
 
-    def test_opens_on_how_it_works_then_home(self, mission):
+    def test_opens_on_the_launcher_then_how_it_works_then_home(self, mission):
         win, _ = mission
+        assert win.stack.currentWidget() is win.launcher
+        win.launcher.live.emit()
         assert win.stack.currentWidget() is win.intro
         win.intro.start.emit()
+        assert win.stack.currentWidget() is win.home
+        win.home.back.emit()
+        win.launcher.live.emit()          # the intro is shown once
         assert win.stack.currentWidget() is win.home
 
     def test_replay_plays_to_a_plain_verdict(self, mission):
