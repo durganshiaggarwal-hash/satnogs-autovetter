@@ -356,6 +356,8 @@ class VettingSession:
         if not kept:
             return []
         probability = self._model.predict_proba_features(features)
+        if self._bundle is not None:
+            probability = self._bundle.calibrate(probability)
         items = [Item(o, float(p), self.policy.verdict(float(p)), f) for o, p, f in zip(kept, probability, features)]
         self._all.extend(items)
         self._by_id.update({i.obs.id: i for i in items})

@@ -147,3 +147,52 @@ def test_feed_stops_quietly_when_its_window_is_gone(tmp_path):
     feed = LiveFeed(ArtifactCache(tmp_path), Manifest(tmp_path / "l.jsonl"))
     feed.stop()
     assert feed.stopped and issubclass(_Closed, Exception)
+
+
+class TestCalibration:
+    def test_temperature_can_be_rebuilt_and_changes_no_decision(self):
+        from satrecovery.confidence.calibration import TemperatureScaling
+        from satrecovery.vetting.bundle import apply_temperature, fit_temperature
+
+        rng = np.random.default_rng(5)
+        truth = rng.random(2000) < 0.5
+        # An overconfident source: says 0.95 but is right 80% of the time.
+        right = rng.random(2000) < 0.8
+        p = np.where(truth == right, 0.95, 0.05)
+        temperature = fit_temperature(p, truth.astype(int))
+        assert temperature > 1.0                                          # it was overconfident
+        calibrated = apply_temperature(p, temperature)
+        assert np.array_equal(calibrated >= 0.5, p >= 0.5)                # no decision changes
+        assert abs(np.mean(np.maximum(calibrated, 1 - calibrated)) - 0.8) < 0.03   # now honest
+        rebuilt = TemperatureScaling.with_temperature(temperature)
+        assert rebuilt.is_fitted and rebuilt.temperature == pytest.approx(temperature)
+        with pytest.raises(ValidationError):
+            TemperatureScaling.with_temperature(0)
+
+    def test_bundle_keeps_its_temperature(self, trained):
+        bundle, cache, root, _ = trained
+        bundle.save(root / "m")
+        again = VetterBundle.load(root / "m")
+        assert again.temperature == pytest.approx(bundle.temperature)
+        assert again.oof_station is not None and len(again.oof_station) == bundle.n_train
+
+
+class TestPhysicsCombination:
+    def test_physics_row_and_combined_model(self):
+        from satrecovery.vetting.orbit import Curve, Match, TrackExplanation
+        from satrecovery.vetting.physics import PHYSICS, CombinedVetter, physics_row, physics_vector
+
+        s = np.linspace(0, 1, 3)
+        ground = Match(Curve(0, "Ground transmitter (fixed frequency)", "", 1.0, s, s, s, s), 0.9, 0.0, 40)
+        sched = Match(Curve(5, "X (as scheduled)", "", 1.0, s, s, s, s, True), 0.1, 0.0, 40)
+        row = physics_row(TrackExplanation(None, None, None, s, s, (ground, sched), None, "", "", "ground"))
+        assert row["ground"] == 0.9 and row["scheduled"] == 0.1 and row["source"] == "ground"
+        assert physics_vector(row).shape == (len(PHYSICS),)
+
+        rng = np.random.default_rng(0)
+        y = rng.integers(0, 2, 400)
+        physics = np.zeros((400, len(PHYSICS)))
+        physics[:, 1] = y * 0.9                      # 'scheduled' share follows the truth
+        model = CombinedVetter().fit(np.full(400, 0.5), physics, y)
+        assert np.mean((model.predict_proba(np.full(400, 0.5), physics) >= 0.5) == y) > 0.95
+        assert CombinedVetter.from_dict(model.to_dict()).predict_proba(np.array([0.5]), physics[:1]).shape == (1,)

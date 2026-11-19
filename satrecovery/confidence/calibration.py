@@ -213,6 +213,17 @@ class TemperatureScaling(Calibrator):
         """The fitted temperature. Above 1 means the source was overconfident."""
         return self._temperature
 
+    @classmethod
+    def with_temperature(cls, temperature: float) -> "TemperatureScaling":
+        """A calibrator already fitted elsewhere, rebuilt from its one saved number."""
+        temperature = float(temperature)
+        if not temperature > 0:
+            raise ValidationError("temperature", temperature, "must be positive")
+        calibrator = cls()
+        calibrator._temperature = temperature
+        calibrator._fitted = True
+        return calibrator
+
     def _fit(self, confidence, correct):
         logits = _to_logit(confidence)
 

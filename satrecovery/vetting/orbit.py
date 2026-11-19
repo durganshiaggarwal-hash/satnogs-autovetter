@@ -146,6 +146,7 @@ class StationDirectory:
     def __init__(self, root: str | Path, transport: Transport | None = None) -> None:
         self._path = Path(root) / "catalog" / "stations.json"
         self._transport = transport or UrllibTransport()
+        self._last_lookup = -1e9
         try:
             self._known = {int(k): v for k, v in json.loads(self._path.read_text(encoding="utf-8")).items()}
         except (OSError, ValueError):
@@ -157,6 +158,11 @@ class StationDirectory:
         if obs.ground_station is None:
             raise OrbitError(f"observation {obs.id} has no ground station")
         if obs.ground_station not in self._known:
+            # Be gentle with the volunteer-run API: at most one station look-up a second.
+            wait = 1.0 - (time.monotonic() - self._last_lookup)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_lookup = time.monotonic()
             response = self._transport.get(self.URL.format(obs.ground_station))
             rows = response.json() if response.status == 200 else []
             if not rows:
