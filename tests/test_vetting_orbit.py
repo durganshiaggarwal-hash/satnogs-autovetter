@@ -238,3 +238,20 @@ class TestVerdicts:
         new_launch = Observation.from_api({"id": 3, "norad_cat_id": 98528, "start": "2026-11-20T00:00:00Z",
                                            "tle1": TLE[0], "tle2": TLE[1]})
         assert plausible_time_error_s(new_launch) == 600
+
+
+class TestLinkPhysics:
+    def test_delay_doppler_speed_and_next_passes(self):
+        from satrecovery.vetting.orbit import ground_track, next_passes
+
+        peak = find_pass()
+        track = ground_track(TLE, SITE, peak - timedelta(seconds=400), np.linspace(0, 800, 81))
+        i_top = int(np.argmax(track.elevation))
+        assert track.delay_ms(i_top) == pytest.approx(track.range_km[i_top] / 299792.458 * 1000)
+        assert 6.5 < float(np.median(track.speed_kms)) < 8.0                    # low Earth orbit speed
+        first, last = 5, 75
+        assert track.doppler_hz(first, 436e6) > 0 > track.doppler_hz(last, 436e6)  # higher, then lower
+        assert abs(track.doppler_hz(i_top, 436e6)) < abs(track.doppler_hz(first, 436e6))
+        passes = next_passes(TLE, SITE, peak + timedelta(minutes=20), hours=24, min_elevation=0)
+        assert passes and all(p.rise < p.culminate < p.set and p.max_elevation >= 0 for p in passes)
+        assert passes[0].rise > peak

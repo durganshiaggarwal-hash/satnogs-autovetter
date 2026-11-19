@@ -69,6 +69,7 @@ class SkyPlot(QWidget):
         self._tracks: list[tuple[np.ndarray, np.ndarray, str, bool]] = []
         self._seconds: np.ndarray | None = None
         self._now: float | None = None
+        self.filled = False
 
     def set_tracks(self, seconds: np.ndarray | None, tracks: list[tuple[np.ndarray, np.ndarray, str, bool]]) -> None:
         self._seconds, self._tracks, self._now = seconds, tracks, None
@@ -89,6 +90,11 @@ class SkyPlot(QWidget):
         side = min(self.width(), self.height()) - 24
         centre = QPointF(self.width() / 2, self.height() / 2)
         radius = side / 2
+        if self.filled:   # as an inset over a map: a dark disc so the chart stays readable
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(6, 10, 16, 225))
+            painter.drawEllipse(centre, radius + 14, radius + 14)
+            painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(QColor(theme.RULE), 1))
         for el in (0, 30, 60):
             r = radius * (1 - el / 90)

@@ -499,6 +499,17 @@ class GroundTrack:
     elevation: np.ndarray = field(repr=False)   # as seen from the station
     footprint_deg: np.ndarray = field(repr=False)
     range_km: np.ndarray | None = field(default=None, repr=False)   # station to satellite, straight line
+    range_rate_kms: np.ndarray | None = field(default=None, repr=False)   # + moving away, - coming closer
+    speed_kms: np.ndarray | None = field(default=None, repr=False)        # orbital speed
+    azimuth: np.ndarray | None = field(default=None, repr=False)          # as seen from the station
+
+    def delay_ms(self, i: int) -> float | None:
+        """One-way radio delay, station to satellite: distance / speed of light."""
+        return None if self.range_km is None else float(self.range_km[i] / (C / 1000.0) * 1000.0)
+
+    def doppler_hz(self, i: int, frequency_hz: float) -> float | None:
+        """How far the satellite's signal is shifted, as heard *before* the station's correction."""
+        return None if self.range_rate_kms is None else float(-frequency_hz * self.range_rate_kms[i] * 1000.0 / C)
 
 
 def ground_track(tle: tuple[str, str], site: Site, start: datetime, seconds: np.ndarray) -> GroundTrack:
@@ -512,8 +523,47 @@ def ground_track(tle: tuple[str, str], site: Site, start: datetime, seconds: np.
     height = np.atleast_1d(wgs84.height_of(where).km)
     place = wgs84.latlon(site.lat, site.lng, elevation_m=site.alt_m)
     seen = (satellite - place).at(t)
-    elevation = np.atleast_1d(seen.altaz()[0].degrees)
+    alt, az, _ = seen.altaz()
+    elevation, azimuth = np.atleast_1d(alt.degrees), np.atleast_1d(az.degrees)
     distance = np.atleast_1d(seen.distance().km)
+    *_, range_rate = seen.frame_latlon_and_rates(place)
+    speed = np.linalg.norm(np.atleast_2d(where.velocity.km_per_s.T), axis=1)
     footprint = np.degrees(np.arccos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + np.maximum(height, 1.0))))
     return GroundTrack(np.asarray(seconds, float), np.atleast_1d(below.latitude.degrees),
-                       np.atleast_1d(below.longitude.degrees), height, elevation, footprint, distance)
+                       np.atleast_1d(below.longitude.degrees), height, elevation, footprint, distance,
+                       np.atleast_1d(range_rate.km_per_s), speed, azimuth)
+
+
+@dataclass(frozen=True)
+class Pass:
+    rise: datetime
+    culminate: datetime
+    set: datetime
+    max_elevation: float
+
+
+def next_passes(tle: tuple[str, str], site: Site, after: datetime, hours: float = 24.0,
+                min_elevation: float = 10.0, limit: int = 4) -> list[Pass]:
+    """The satellite's next passes over the station: rise, highest point, set."""
+    from skyfield.api import EarthSatellite, wgs84
+
+    ts = _timescale()
+    satellite = EarthSatellite(tle[0], tle[1], ts=ts)
+    place = wgs84.latlon(site.lat, site.lng, elevation_m=site.alt_m)
+    t0, t1 = ts.from_datetime(after), ts.from_datetime(after + timedelta(hours=hours))
+    times, events = satellite.find_events(place, t0, t1, altitude_degrees=0.0)
+    passes, current = [], {}
+    for t, event in zip(times, events):
+        if event == 0:
+            current = {"rise": t}
+        elif event == 1 and "rise" in current:
+            current["top"] = t
+        elif event == 2 and "top" in current:
+            top = current["top"]
+            elevation = float((satellite - place).at(top).altaz()[0].degrees)
+            if elevation >= min_elevation:
+                passes.append(Pass(current["rise"].utc_datetime(), top.utc_datetime(), t.utc_datetime(), elevation))
+            current = {}
+        if len(passes) >= limit:
+            break
+    return passes

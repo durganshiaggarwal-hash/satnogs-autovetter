@@ -31,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expert", action="store_true", help="open the vetting station (expert mode) directly")
     parser.add_argument("--replay", type=int, help="open the replay of this observation")
     parser.add_argument("--screen", choices=("launcher", "intro", "home"), default="launcher")
+    parser.add_argument("--view", choices=("map", "globe"), default="map", help="replay: flat map or 3D globe")
     parser.add_argument("--at", type=float, help="with --replay --screenshot: pause this far into the pass (0..1)")
     args = parser.parse_args(argv)
 
@@ -94,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         window.show()
         if args.replay:
             window.open_replay(args.replay)
+            window.replay.set_view(args.view.capitalize())
     if feed is not None and not args.screenshot:
         feed.start()
     if args.screenshot:

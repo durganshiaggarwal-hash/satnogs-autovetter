@@ -91,7 +91,7 @@ class WorldMap(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(520, 360)
+        self.setMinimumSize(520, 300)
         self._land = _land()
         self._station: tuple[float, float] | None = None
         self._station_name = ""
@@ -221,6 +221,8 @@ class WorldMap(QWidget):
             link.setAlpha(int(90 + 165 * self._pulse))
             painter.setPen(QPen(link, 1.5 + 2.5 * self._pulse))
             painter.drawLine(QPointF(sx, sy), QPointF(float(px), float(py)))
+            if self._pulse > 0.35:
+                self._pulses(painter, sx, sy, float(px), float(py), self._t)
         glow = QRadialGradient(QPointF(sx, sy), 18)
         glow.setColorAt(0, QColor(86, 200, 216, 180))
         glow.setColorAt(1, QColor(86, 200, 216, 0))
@@ -245,6 +247,18 @@ class WorldMap(QWidget):
         x = self.width() / 2 + dlon * self._scale() * math.cos(math.radians(self._lat0)) ** 0.5
         _, y = self._xy(lats, self._lon0)
         return QPolygonF([QPointF(a, b) for a, b in zip(x, y)])
+
+    @staticmethod
+    def _pulses(painter: QPainter, sx: float, sy: float, px: float, py: float, seconds: float) -> None:
+        """Bright dots travelling down the link, satellite to station: drawn only while a signal is heard."""
+        painter.setPen(Qt.NoPen)
+        for k in range(4):
+            phase = (seconds * 0.9 + k / 4) % 1.0
+            x, y = sx + (px - sx) * phase, sy + (py - sy) * phase
+            colour = QColor(theme.SIGNAL)
+            colour.setAlpha(int(255 * (1 - abs(phase - 0.5))))
+            painter.setBrush(colour)
+            painter.drawEllipse(QPointF(x, y), 3.2, 3.2)
 
     @staticmethod
     def _satellite_icon(painter: QPainter, x: float, y: float) -> None:
@@ -340,10 +354,39 @@ class ReplayScreen(QWidget):
         top.addWidget(expert)
         outer.addLayout(top)
 
+        from .globe import GlobeMap
+        from .link import LinkPanel, PassTimeline
+        from .orbit_view import SkyPlot
+
         middle = QHBoxLayout()
         middle.setSpacing(18)
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        switch = QHBoxLayout()
+        switch.addWidget(label("THE PASS", "caps", wrap=False))
+        switch.addStretch(1)
+        self.view_buttons = {}
+        for name in ("Map", "Globe"):
+            button = QPushButton(name)
+            button.setObjectName("quiet")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, n=name: self.set_view(n))
+            self.view_buttons[name] = button
+            switch.addWidget(button)
+        left.addLayout(switch)
+        self.views = QStackedWidget()
         self.map = WorldMap()
-        middle.addWidget(self.map, 3)
+        self.globe = GlobeMap()
+        self.views.addWidget(self.map)
+        self.views.addWidget(self.globe)
+        left.addWidget(self.views, 1)
+        # The station's sky, radar-style, as an inset in the map's corner.
+        self.sky = SkyPlot(self.views)
+        self.sky.setFixedSize(170, 170)
+        self.sky.filled = True
+        self.sky.raise_()
+        self.link = LinkPanel()
+        middle.addLayout(left, 3)
         right = QVBoxLayout()
         right.addWidget(label("WHAT THE ANTENNA HEARD", "caps"))
         self.scope = pg.PlotWidget(background=theme.BG)
@@ -367,6 +410,8 @@ class ReplayScreen(QWidget):
         right.addWidget(self.scope, 1)
         self.caption = label("", "body")
         right.addWidget(self.caption)
+        right.addWidget(label("THE RADIO LINK, NOW", "caps", wrap=False))
+        right.addWidget(self.link)
         middle.addLayout(right, 2)
         outer.addLayout(middle, 1)
 
@@ -392,6 +437,8 @@ class ReplayScreen(QWidget):
         sure.addWidget(self.volunteer)
         sure.addStretch(1)
         words.addLayout(sure)
+        self.next_passes = label("", "body")
+        words.addWidget(self.next_passes)
         row.addLayout(words, 1)
         controls = QVBoxLayout()
         buttons = QHBoxLayout()
@@ -404,11 +451,10 @@ class ReplayScreen(QWidget):
         self.speed.clicked.connect(self._cycle_speed)
         buttons.addWidget(self.speed)
         controls.addLayout(buttons)
-        self.timeline = QSlider(Qt.Horizontal)
-        self.timeline.setRange(0, 1000)
-        self.timeline.sliderMoved.connect(self._scrub)
-        controls.addWidget(self.timeline)
         row.addLayout(controls)
+        self.pass_line = PassTimeline()
+        self.pass_line.scrubbed.connect(lambda f: self._scrub(int(f * 1000)))
+        outer.addWidget(self.pass_line)
         outer.addWidget(card)
 
         self._timer = QTimer(self)
@@ -416,6 +462,25 @@ class ReplayScreen(QWidget):
         self._timer.timeout.connect(self._tick)
         self._clock = QElapsedTimer()
         self._show_story(None)
+        self.set_view("Map")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._place_sky()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._place_sky()
+
+    def _place_sky(self) -> None:
+        self.sky.move(self.views.width() - self.sky.width() - 12, 12)
+        self.sky.raise_()
+
+    def set_view(self, name: str) -> None:
+        self.views.setCurrentWidget(self.globe if name == "Globe" else self.map)
+        for key, button in self.view_buttons.items():
+            button.setChecked(key == name)
+        self._place_sky()   # changing page raises it above the inset
 
     # ------------------------------------------------------------------
     def load(self, obs_id: int) -> None:
@@ -435,6 +500,9 @@ class ReplayScreen(QWidget):
         self._track = None
         self._narrator = None
         self.map.set_pass(self._station_or_default(obs), obs.station_name, None)
+        self.globe.set_pass(self._station_or_default(obs), obs.station_name, None)
+        self.sky.set_tracks(None, [])
+        self.next_passes.setText("")
         try:
             site = self._explainer.stations.site(obs) if self._explainer else None
             if site is not None and obs.tle is not None and obs.start is not None:
@@ -442,6 +510,12 @@ class ReplayScreen(QWidget):
                 seconds = np.linspace(-margin, (obs.duration_s or 600) + margin, 400)
                 self._track = ground_track(obs.tle, site, obs.start, seconds)
                 self.map.set_pass((site.lat, site.lng), obs.station_name, self._track)
+                self.globe.set_pass((site.lat, site.lng), obs.station_name, self._track)
+                self.sky.set_tracks(self._track.seconds, [(self._track.azimuth, self._track.elevation,
+                                                           theme.ACCENT, True)])
+                self._show_next_passes(obs, site)
+                self.pass_line.set_pass(obs.start, self._t0, self._t1, self._track,
+                                        np.maximum(self._band, self._anywhere))
                 self._places = self._places or Places()
                 self._narrator = PassNarrator(self._track, satellite, self._places, activity=self._activity)
         except (OrbitError, OSError, ValueError):
@@ -458,6 +532,17 @@ class ReplayScreen(QWidget):
         else:
             self._show_story(None, final=True)
         self.restart()
+
+    def _show_next_passes(self, obs, site) -> None:
+        from ..orbit import next_passes
+
+        try:
+            passes = next_passes(obs.tle, site, obs.end or obs.start, hours=24)
+        except (OrbitError, ValueError):
+            return
+        if passes:
+            when = "  ·  ".join(f"{p.rise:%d %b %H:%M} UTC, {p.max_elevation:.0f}° high" for p in passes[:3])
+            self.next_passes.setText(f"Next passes over this station after this recording:  {when}")
 
     def _station_or_default(self, obs) -> tuple[float, float]:
         if obs.station_lat is not None and obs.station_lng is not None:
@@ -493,6 +578,9 @@ class ReplayScreen(QWidget):
         # interference crosses the centre only briefly.
         anywhere = power[:, edge:n_freq - edge].max(axis=1)
         self._anywhere = np.clip((anywhere - 3.0) / 3.0, 0.0, 1.0)
+        if hasattr(self, "pass_line"):
+            self.pass_line.set_pass(obs.start, self._t0, self._t1, getattr(self, "_track", None),
+                                    np.maximum(self._band, self._anywhere))
 
     def _activity(self, seconds: float) -> float:
         """How strong the signal at the centre is at this moment of the recording (0..1)."""
@@ -617,9 +705,10 @@ class ReplayScreen(QWidget):
         pulse = float(self._band[min(rows, n_time - 1)]) if self._band is not None and rows else 0.0
         subtitle = self._narrator.line(self._t) if self._narrator is not None else ""
         self.map.set_time(self._t, pulse, subtitle)
-        self.timeline.blockSignals(True)
-        self.timeline.setValue(int(np.clip(fraction, 0, 1) * 1000))
-        self.timeline.blockSignals(False)
+        self.globe.set_time(self._t, pulse, subtitle)
+        self.sky.set_time(self._t)
+        self.pass_line.set_time(self._t)
+        self.link.show_moment(self._track, self._t, self._item.obs.frequency_hz if self._item else None)
         caption = f"{max(self._t, 0) // 60:.0f}:{max(self._t, 0) % 60:02.0f} into the recording"
         if self._track is not None:
             i = int(np.clip(np.searchsorted(self._track.seconds, self._t), 0, len(self._track.seconds) - 1))

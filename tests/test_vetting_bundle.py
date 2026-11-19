@@ -196,3 +196,32 @@ class TestPhysicsCombination:
         model = CombinedVetter().fit(np.full(400, 0.5), physics, y)
         assert np.mean((model.predict_proba(np.full(400, 0.5), physics) >= 0.5) == y) > 0.95
         assert CombinedVetter.from_dict(model.to_dict()).predict_proba(np.array([0.5]), physics[:1]).shape == (1,)
+
+
+def test_link_panel_timeline_and_globe_draw_a_real_pass():
+    from PySide6.QtWidgets import QApplication
+
+    from satrecovery.vetting.gui.globe import GlobeMap
+    from satrecovery.vetting.gui.link import LinkPanel, PassTimeline
+    from satrecovery.vetting.orbit import Site, ground_track
+
+    app = QApplication.instance() or QApplication([])
+    tle = ("1 69015U 26100AM  26323.14274952  .00009061  00000-0  37966-3 0  9990",
+           "2 69015  97.3828 218.4872 0006677 207.2028 152.8861 15.23733342 30400")
+    site = Site(39.963, -85.93, 250.0)
+    start = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    track = ground_track(tle, site, start, np.linspace(0, 6000, 300))
+    panel = LinkPanel()
+    panel.show_moment(track, float(track.seconds[np.argmax(track.elevation)]), 436e6)
+    assert panel._values["delay"].text().endswith("ms") and panel._values["doppler"].text().endswith("kHz")  # noqa: SLF001
+    panel.show_moment(None, 0.0, None)
+    assert panel._values["distance"].text() == "–"  # noqa: SLF001
+    for widget in (PassTimeline(), GlobeMap()):
+        widget.resize(600, 400)
+        if isinstance(widget, PassTimeline):
+            widget.set_pass(start, 0.0, 6000.0, track, np.ones(50))
+        else:
+            widget.set_pass((site.lat, site.lng), "test", track)
+            widget.set_time(1000.0, 1.0, "a subtitle")
+        assert not widget.grab().isNull()
+    app.processEvents()
