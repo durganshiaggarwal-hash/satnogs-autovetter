@@ -75,6 +75,12 @@ class VettingWindow(QMainWindow):
         outer.setSpacing(0)
         outer.addWidget(self._top_bar())
         outer.addWidget(rule())
+        self.banner = QLabel()
+        self.banner.setObjectName("mono")
+        self.banner.setContentsMargins(16, 6, 16, 6)
+        self.banner.setTextFormat(Qt.RichText)
+        outer.addWidget(self.banner)
+        outer.addWidget(rule())
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
@@ -90,6 +96,7 @@ class VettingWindow(QMainWindow):
             "T track on/off   V show volunteer's answer   decisions are saved as you go")
 
         self._keys()
+        self._update_mode()
         self._refresh_counts()
         self.table.selectRow(0)
         # Start in the queue: otherwise the first focusable widget (a threshold
@@ -115,10 +122,20 @@ class VettingWindow(QMainWindow):
         titles.addWidget(title)
         titles.addWidget(sub)
         layout.addLayout(titles)
+        layout.addSpacing(24)
+
+        # Which queue: the real work, or the test set that measures the model.
+        self.mode_buttons = {}
+        for mode in VettingSession.MODES:
+            button = QPushButton()
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, m=mode: self._set_mode(m))
+            self.mode_buttons[mode] = button
+            layout.addWidget(button)
         layout.addStretch(1)
 
         self.c_auto_share = Counter("automatable", theme.ACCENT)
-        self.c_error = Counter("error when sure")
+        self.c_error = Counter("error when sure (test set)")
         self.c_check = Counter("to check", theme.UNSURE)
         self.c_auto = Counter("auto-vetted")
         self.c_you = Counter("by you")
@@ -269,6 +286,7 @@ class VettingWindow(QMainWindow):
             ("station", f"{obs.ground_station} · {obs.station_name[:22]}"),
             ("pass", f"{duration} · max elev {obs.max_altitude_deg:.0f}°" if obs.max_altitude_deg else duration),
             ("frames decoded", str(obs.n_decoded_frames)),
+            ("SatNOGS rating", self._rating(obs.status)),
         ]
         self.meta.setText("<table cellspacing='0' cellpadding='1'>" + "".join(
             f"<tr><td style='color:{theme.DIM}; padding-right:10px'>{k}</td><td>{v}</td></tr>" for k, v in rows)
@@ -284,6 +302,45 @@ class VettingWindow(QMainWindow):
             self.statusBar().showMessage(f"Could not draw {obs.id}: {error}", 6000)
         self._show_decision()
         self._show_answer()
+
+    @staticmethod
+    def _rating(status: str) -> str:
+        """SatNOGS's own automatic rating, which is not a look at the waterfall."""
+        note = {
+            "good": "automatic: data frames were decoded",
+            "bad": "automatic",
+            "failed": "automatic: the station sent no results",
+            "unknown": "not rated",
+        }.get(status, "")
+        return f"{status}" + (f" <span style='color:{theme.DIM}'>({note})</span>" if note else "")
+
+    def _set_mode(self, mode: str) -> None:
+        self._session.set_mode(mode)
+        self._update_mode()
+        self.model.set_order(self.order.currentText())
+        self._refresh_counts()
+        if self.model.rowCount():
+            self.table.selectRow(0)
+        self.table.setFocus()
+
+    def _update_mode(self) -> None:
+        for mode, button in self.mode_buttons.items():
+            title = "UNVETTED" if mode == "unvetted" else "TEST SET"
+            button.setText(f"{title} · {self._session.count(mode)}")
+            button.setChecked(mode == self._session.mode)
+            button.setObjectName("primary" if mode == self._session.mode else "")
+            button.style().unpolish(button)
+            button.style().polish(button)
+        if self._session.mode == "unvetted":
+            self.banner.setText(
+                f"<span style='color:{theme.ACCENT}'>REAL WORK</span>&nbsp;&nbsp;No volunteer has checked these on "
+                f"SatNOGS, so the verdicts here are new information.  Your decisions are saved on this computer only; "
+                f"nothing is sent to SatNOGS.")
+        else:
+            self.banner.setText(
+                f"<span style='color:{theme.UNSURE}'>TEST SET</span>&nbsp;&nbsp;These already have a volunteer's answer "
+                f"on SatNOGS.  Each is scored by a model that never saw its station, to measure how often it is right.")
+        self.reveal.setVisible(self._session.mode == "test")
 
     def _show_decision(self) -> None:
         decision = self._session.decision(self._current) if self._current else None
@@ -301,7 +358,8 @@ class VettingWindow(QMainWindow):
         obs = self._session.item(self._current).obs
         decided = self._session.decision(obs.id) is not None
         if obs.waterfall_label is WaterfallLabel.UNKNOWN:
-            self.answer.setText(f"<span style='color:{theme.FAINT}'>no volunteer has vetted this yet</span>")
+            self.answer.setText(f"<span style='color:{theme.FAINT}'>no volunteer has checked this on SatNOGS yet: "
+                                f"your call is the first</span>")
         elif self.reveal.isChecked() or decided:
             colour = theme.SIGNAL if obs.waterfall_label is WaterfallLabel.SIGNAL else theme.NO_SIGNAL
             self.answer.setText(f"volunteer said: <span style='color:{colour}'>{obs.waterfall_label.value}</span>")

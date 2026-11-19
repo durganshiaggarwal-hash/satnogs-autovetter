@@ -217,3 +217,58 @@ class TestWindow:
         assert int(win.c_auto.value.text()) == session.stats()["auto"]
         win.high.setValue(0.99)
         assert session.policy.high == pytest.approx(0.99)
+
+
+# ----------------------------------------------------------------------
+from satrecovery.vetting.source import ManifestSource  # noqa: E402
+from satrecovery.vetting.unvetted import fetch_unvetted, is_unvetted  # noqa: E402
+
+
+def unvetted_obs(i: int, **changes) -> Observation:
+    row = {"id": i, "ground_station": 99, "norad_cat_id": 7, "start": "2099-01-01T00:00:00Z",
+           "end": "2099-01-01T00:09:00Z", "waterfall": f"https://cdn.example/{i}.png", "status": "unknown",
+           "waterfall_status": "unknown", "waterfall_status_user": None}
+    row.update(changes)
+    return Observation.from_api(row)
+
+
+class TestUnvetted:
+    def test_what_counts_as_unvetted(self):
+        assert is_unvetted(unvetted_obs(1))
+        assert not is_unvetted(unvetted_obs(2, waterfall_status="with-signal", waterfall_status_user=3))
+        assert not is_unvetted(unvetted_obs(3, waterfall=None))
+        assert not is_unvetted(unvetted_obs(4, status="future"))
+
+    def test_fetch_keeps_only_new_unvetted_ones(self, tmp_path):
+        rng = np.random.default_rng(0)
+        cache = ArtifactCache(tmp_path)
+        listing = Manifest(tmp_path / "listing.jsonl")
+        for obs in [unvetted_obs(1), unvetted_obs(2, waterfall_status="with-signal", waterfall_status_user=3),
+                    unvetted_obs(3), unvetted_obs(4, status="future"), unvetted_obs(5)]:
+            listing.add(obs)
+            WaterfallImage(synthetic(True, rng)).save(cache.waterfall_path(obs))
+        queue = Manifest(tmp_path / "unvetted.jsonl")
+        added = fetch_unvetted(ManifestSource(listing), cache, queue, count=10, skip={5})
+        assert added == 2 and sorted(o.id for o in queue) == [1, 3]
+
+    def test_session_has_two_modes(self, downloaded):
+        manifest, cache, root = downloaded
+        rng = np.random.default_rng(9)
+        fresh = []
+        for i in range(500, 510):
+            obs = unvetted_obs(i)
+            WaterfallImage(synthetic(i % 2 == 0, rng)).save(cache.waterfall_path(obs))
+            fresh.append(obs)
+        session = VettingSession.from_cache(manifest, cache, unvetted=fresh)
+        assert session.mode == "unvetted" and len(session) == 10 and session.count("test") == 60
+        assert all(not i.known for i in session.ordered())
+        error_unvetted = session.stats()["confident_error"]
+        session.set_mode("test")
+        assert len(session) == 60 and all(i.known for i in session.ordered())
+        assert session.stats()["confident_error"] == error_unvetted  # always measured on the test set
+        session.set_mode("unvetted")
+        session.auto_vet()
+        assert all(session.decision(i.obs.id) is None for i in session.ordered("unsure first")
+                   if i.known)  # auto-vet touched only this mode
+        with pytest.raises(ValidationError):
+            session.set_mode("everything")

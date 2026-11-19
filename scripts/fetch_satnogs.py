@@ -52,12 +52,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--audio", action="store_true", help="also download the audio (a few MB each)")
     parser.add_argument("--keep-png", action="store_true", help="keep the original waterfall pictures too")
     parser.add_argument("--out", default=str(ROOT / "satrecovery_data" / "satnogs"))
+    parser.add_argument("--unvetted", type=int, default=0, metavar="N",
+                        help="instead: download N recent observations nobody has checked yet")
     args = parser.parse_args(argv)
 
     out = Path(args.out)
     manifest = Manifest(out / "manifest.jsonl")
     cache = ArtifactCache(out, keep_png=args.keep_png)
     source = SatnogsApiSource()
+
+    if args.unvetted:
+        from satrecovery.vetting.unvetted import fetch_unvetted
+
+        queue = Manifest(out / "unvetted.jsonl")
+        print(f"Unvetted queue: {queue.path} (already {len(queue)}); fetching up to {args.unvetted} more")
+        added = fetch_unvetted(source, cache, queue, args.unvetted, skip={o.id for o in manifest},
+                               progress=lambda line: print("  " + line, flush=True))
+        print(f"Added {added}; the queue now holds {len(queue)}.  API pages requested: {source.requests_made}.")
+        return 0
     print(f"Saving to {out}  (already have {len(manifest)}: {manifest.counts() or 'nothing'})")
 
     # Both labels are fetched in turn, one observation each, so the data is

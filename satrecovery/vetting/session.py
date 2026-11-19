@@ -248,16 +248,33 @@ class Item:
     def uncertainty(self) -> float:
         return 1.0 - abs(self.probability - 0.5) * 2.0
 
+    @property
+    def known(self) -> bool:
+        """Has a volunteer already checked it (so it is test data, not new work)?"""
+        return self.obs.waterfall_label is not WaterfallLabel.UNKNOWN
+
 
 class VettingSession:
+    """The queue for one sitting, in one of two modes.
+
+    * ``"unvetted"`` -- the real work: observations no volunteer has
+      checked.  Scored by a forest trained on every checked observation.
+      SatNOGS has no human answer for these, so the verdict is new.
+    * ``"test"`` -- observations volunteers *have* checked, each scored by
+      a forest that never saw its station.  Here the volunteer's answer
+      exists, so this mode measures how often the vetter is right; it is
+      where the "error when sure" figure comes from, in both modes.
+    """
+
     ORDERS = ("unsure first", "newest first", "disagreements", "not decided")
+    MODES = ("unvetted", "test")
 
     def __init__(self, items: Sequence[Item], cache: ArtifactCache, explainer: Explainer,
                  policy: Policy = Policy(), log: DecisionLog | None = None, model_name: str = "") -> None:
         if not items:
             raise ValidationError("items", 0, "nothing to vet")
-        self._items = list(items)
-        self._by_id = {item.obs.id: item for item in self._items}
+        self._all = list(items)
+        self._by_id = {item.obs.id: item for item in self._all}
         self._cache = cache
         self._explainer = explainer
         # "is not None", not "or": an empty log has len() 0, so it is falsy,
@@ -265,13 +282,16 @@ class VettingSession:
         self._log = log if log is not None else DecisionLog(None)
         self.model_name = model_name
         self.policy = policy
+        self.mode = "unvetted" if self.count("unvetted") else "test"
 
     # ------------------------------------------------------------------
     @classmethod
     def from_cache(cls, observations: Iterable[Observation], cache: ArtifactCache,
-                   policy: Policy = Policy(), log_path: str | Path | None = None, progress=None) -> "VettingSession":
+                   policy: Policy = Policy(), log_path: str | Path | None = None, progress=None,
+                   unvetted: Iterable[Observation] = ()) -> "VettingSession":
         labelled = [o for o in observations if o.is_trainable]
-        kept, features = FeatureStore(cache).get(labelled, progress)
+        store = FeatureStore(cache)
+        kept, features = store.get(labelled, progress)
         if len(kept) < 20:
             raise ValidationError("observations", len(kept), "need at least 20 downloaded, labelled waterfalls")
         targets = np.array([1 if o.waterfall_label is WaterfallLabel.SIGNAL else 0 for o in kept])
@@ -280,10 +300,32 @@ class VettingSession:
         model.fit_features(features, targets)
         explainer = Explainer(features, targets, model.importances())
         items = [Item(o, float(p), policy.verdict(float(p)), f) for o, p, f in zip(kept, probability, features)]
+
+        known = {o.id for o in kept}
+        fresh = [o for o in unvetted if o.id not in known and o.waterfall_label is WaterfallLabel.UNKNOWN]
+        fresh_kept, fresh_features = store.get(fresh, progress)
+        if fresh_kept:
+            fresh_p = model.predict_proba_features(fresh_features)
+            items += [Item(o, float(p), policy.verdict(float(p)), f)
+                      for o, p, f in zip(fresh_kept, fresh_p, fresh_features)]
         return cls(items, cache, explainer, policy, DecisionLog(log_path),
-                   model_name=f"Forest on {len(FEATURES)} measurements, scored with each station held out")
+                   model_name=f"Forest on {len(FEATURES)} measurements, trained on {len(kept)} volunteer-checked "
+                              f"observations")
 
     # ------------------------------------------------------------------
+    def count(self, mode: str) -> int:
+        return sum(1 for i in self._all if (i.known if mode == "test" else not i.known))
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in self.MODES:
+            raise ValidationError("mode", mode, f"one of {self.MODES}")
+        self.mode = mode
+
+    @property
+    def _items(self) -> list[Item]:
+        test = self.mode == "test"
+        return [i for i in self._all if i.known == test]
+
     def __len__(self) -> int:
         return len(self._items)
 
@@ -292,8 +334,8 @@ class VettingSession:
 
     def set_policy(self, policy: Policy) -> None:
         self.policy = policy
-        self._items = [Item(i.obs, i.probability, policy.verdict(i.probability), i.features) for i in self._items]
-        self._by_id = {item.obs.id: item for item in self._items}
+        self._all = [Item(i.obs, i.probability, policy.verdict(i.probability), i.features) for i in self._all]
+        self._by_id = {item.obs.id: item for item in self._all}
 
     def ordered(self, order: str = "unsure first") -> list[Item]:
         if order not in self.ORDERS:
@@ -304,7 +346,13 @@ class VettingSession:
         if order == "newest first":
             return sorted(items, key=lambda i: i.obs.start or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         if order == "disagreements":
-            return sorted((i for i in items if i.verdict.label not in (None, i.obs.waterfall_label)),
+            # Test mode: the model against the volunteer.  Unvetted: the model against you.
+            def other(i: Item):
+                if i.known:
+                    return i.obs.waterfall_label
+                decision = self.decision(i.obs.id)
+                return decision.label if decision is not None and decision.by == "you" else None
+            return sorted((i for i in items if i.verdict.label is not None and other(i) not in (None, i.verdict.label)),
                           key=lambda i: -abs(i.probability - 0.5))
         return [i for i in items if self.decision(i.obs.id) is None]
 
@@ -328,7 +376,7 @@ class VettingSession:
         return decision
 
     def auto_vet(self) -> int:
-        """Record the model's answer for every confident observation not yet decided."""
+        """Record the model's answer for every confident observation in this mode not yet decided."""
         done = 0
         for item in self._items:
             if item.verdict.label is not None and self.decision(item.obs.id) is None:
@@ -336,25 +384,33 @@ class VettingSession:
                 done += 1
         return done
 
-    def stats(self) -> dict[str, float]:
-        """Counts for the top bar, and how often each kind of decision matched the volunteers."""
-        decided = [self._log.get(i.obs.id) for i in self._items]
-        auto = [(d, i) for d, i in zip(decided, self._items) if d is not None and d.by == "auto"]
-        yours = [(d, i) for d, i in zip(decided, self._items) if d is not None and d.by == "you"]
-        confident = [i for i in self._items if i.verdict is not Verdict.UNSURE]
-        known = [i for i in confident if i.obs.waterfall_label is not WaterfallLabel.UNKNOWN]
+    def measured_error(self) -> tuple[float, int]:
+        """``(share wrong, how many)`` of confident answers on the volunteer-checked set, at this policy."""
+        known = [i for i in self._all if i.known and i.verdict is not Verdict.UNSURE]
         wrong = sum(i.verdict.label is not i.obs.waterfall_label for i in known)
+        return (wrong / len(known) if known else float("nan")), len(known)
+
+    def stats(self) -> dict[str, float]:
+        """Counts for the top bar (this mode), and the error measured on the checked set."""
+        items = self._items
+        decided = [self._log.get(i.obs.id) for i in items]
+        auto = [(d, i) for d, i in zip(decided, items) if d is not None and d.by == "auto"]
+        yours = [(d, i) for d, i in zip(decided, items) if d is not None and d.by == "you"]
+        confident = [i for i in items if i.verdict is not Verdict.UNSURE]
+        error, measured_on = self.measured_error()
+        known_yours = [(d, i) for d, i in yours if i.known]
         return {
-            "total": len(self._items),
+            "total": len(items),
             "confident": len(confident),
-            "unsure": len(self._items) - len(confident),
+            "unsure": len(items) - len(confident),
             "auto": len(auto),
             "yours": len(yours),
-            "to_check": sum(1 for d, i in zip(decided, self._items) if d is None and i.verdict is Verdict.UNSURE),
-            "automatable_share": len(confident) / len(self._items),
-            "confident_error": wrong / len(known) if known else float("nan"),
-            "you_agree_with_volunteers": (float(np.mean([d.label is i.obs.waterfall_label for d, i in yours]))
-                                          if yours else float("nan")),
+            "to_check": sum(1 for d, i in zip(decided, items) if d is None and i.verdict is Verdict.UNSURE),
+            "automatable_share": len(confident) / len(items) if items else float("nan"),
+            "confident_error": error,
+            "error_measured_on": measured_on,
+            "you_agree_with_volunteers": (float(np.mean([d.label is i.obs.waterfall_label for d, i in known_yours]))
+                                          if known_yours else float("nan")),
         }
 
 

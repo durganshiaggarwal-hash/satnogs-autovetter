@@ -35,8 +35,10 @@ def main(argv: list[str] | None = None) -> int:
     from ...core.exceptions import ValidationError
 
     try:
+        unvetted = Manifest(data / "unvetted.jsonl")
+        print(f"  and {len(unvetted)} that nobody has checked yet", flush=True)
         session = VettingSession.from_cache(
-            manifest, ArtifactCache(data), log_path=data / "decisions.jsonl",
+            manifest, ArtifactCache(data), log_path=data / "decisions.jsonl", unvetted=unvetted,
             progress=lambda done, total: print(f"  measuring waterfalls: {done}/{total}", flush=True))
     except ValidationError as error:
         print(f"Cannot open the vetting station: {error.reason}.\n"
