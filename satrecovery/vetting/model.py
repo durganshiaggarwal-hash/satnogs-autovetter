@@ -271,26 +271,38 @@ class FeatureVetter(Vetter):
         from sklearn.ensemble import RandomForestClassifier
 
         inputs, targets = self._check_binary(inputs, targets)
+        return self.fit_features(feature_matrix(inputs), targets)
+
+    def fit_features(self, features: np.ndarray, targets: np.ndarray) -> TrainingHistory:
+        """Train from measurements already computed (see :func:`feature_matrix`)."""
+        from sklearn.ensemble import RandomForestClassifier
+
+        features, targets = self._check_pair(features, targets)
+        if features.ndim != 2 or features.shape[1] != len(FEATURES):
+            raise ValidationError("features", features.shape, f"expected (n, {len(FEATURES)})")
         if len(np.unique(targets)) < 2:
             raise ValidationError("targets", np.unique(targets), "need examples of both labels")
         started = time.time()
         self._forest = RandomForestClassifier(
             n_estimators=self._n_trees, min_samples_leaf=self._min_leaf, class_weight="balanced",
-            random_state=self._seed, n_jobs=-1).fit(feature_matrix(inputs), targets)
+            random_state=self._seed, n_jobs=-1).fit(features, targets)
         self._history = TrainingHistory(self.name)
-        self._history.record(1, train_accuracy=float(self._forest.score(feature_matrix(inputs), targets)))
-        self._meta.update(trained_at=time.time(), train_seconds=time.time() - started, n_train=int(len(inputs)))
+        self._history.record(1, train_accuracy=float(self._forest.score(features, targets)))
+        self._meta.update(trained_at=time.time(), train_seconds=time.time() - started, n_train=int(len(features)))
         self._mark_trained()
         return self._history
 
     def predict_proba(self, inputs: np.ndarray) -> np.ndarray:
-        self._require_trained()
         inputs = np.asarray(inputs, dtype=np.float32)
         if inputs.ndim == 2:
             inputs = inputs[None, None]
-        features = feature_matrix(inputs)
+        return self.predict_proba_features(feature_matrix(inputs))
+
+    def predict_proba_features(self, features: np.ndarray) -> np.ndarray:
+        """P(signal) from measurements already computed."""
+        self._require_trained()
         column = list(self._forest.classes_).index(1)
-        return self._forest.predict_proba(features)[:, column].astype(np.float32)
+        return self._forest.predict_proba(np.asarray(features, dtype=np.float32))[:, column].astype(np.float32)
 
     def importances(self) -> dict[str, float]:
         """Each measurement's share of the forest's decisions, largest first."""
