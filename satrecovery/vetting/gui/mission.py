@@ -356,6 +356,7 @@ class ReplayScreen(QWidget):
 
         from .globe import GlobeMap
         from .link import LinkPanel, PassTimeline
+        from .skymap import SkyMap
         from .orbit_view import SkyPlot
 
         middle = QHBoxLayout()
@@ -366,7 +367,7 @@ class ReplayScreen(QWidget):
         switch.addWidget(label("THE PASS", "caps", wrap=False))
         switch.addStretch(1)
         self.view_buttons = {}
-        for name in ("Map", "Globe"):
+        for name in ("Map", "Globe", "Sky"):
             button = QPushButton(name)
             button.setObjectName("quiet")
             button.setCheckable(True)
@@ -377,8 +378,10 @@ class ReplayScreen(QWidget):
         self.views = QStackedWidget()
         self.map = WorldMap()
         self.globe = GlobeMap()
+        self.skymap = SkyMap()
         self.views.addWidget(self.map)
         self.views.addWidget(self.globe)
+        self.views.addWidget(self.skymap)
         left.addWidget(self.views, 1)
         # The station's sky, radar-style, as an inset in the map's corner.
         self.sky = SkyPlot(self.views)
@@ -477,7 +480,9 @@ class ReplayScreen(QWidget):
         self.sky.raise_()
 
     def set_view(self, name: str) -> None:
-        self.views.setCurrentWidget(self.globe if name == "Globe" else self.map)
+        self.views.setCurrentWidget({"Globe": self.globe, "Sky": self.skymap}.get(name, self.map))
+        # The small sky inset would repeat the Sky view, so hide it there.
+        self.sky.setVisible(name != "Sky")
         for key, button in self.view_buttons.items():
             button.setChecked(key == name)
         self._place_sky()   # changing page raises it above the inset
@@ -501,6 +506,7 @@ class ReplayScreen(QWidget):
         self._narrator = None
         self.map.set_pass(self._station_or_default(obs), obs.station_name, None)
         self.globe.set_pass(self._station_or_default(obs), obs.station_name, None)
+        self.skymap.set_pass(self._station_or_default(obs), obs.station_name, None, obs.start, satellite)
         self.sky.set_tracks(None, [])
         self.next_passes.setText("")
         try:
@@ -511,6 +517,7 @@ class ReplayScreen(QWidget):
                 self._track = ground_track(obs.tle, site, obs.start, seconds)
                 self.map.set_pass((site.lat, site.lng), obs.station_name, self._track)
                 self.globe.set_pass((site.lat, site.lng), obs.station_name, self._track)
+                self.skymap.set_pass((site.lat, site.lng), obs.station_name, self._track, obs.start, satellite)
                 self.sky.set_tracks(self._track.seconds, [(self._track.azimuth, self._track.elevation,
                                                            theme.ACCENT, True)])
                 self._show_next_passes(obs, site)
@@ -706,6 +713,7 @@ class ReplayScreen(QWidget):
         subtitle = self._narrator.line(self._t) if self._narrator is not None else ""
         self.map.set_time(self._t, pulse, subtitle)
         self.globe.set_time(self._t, pulse, subtitle)
+        self.skymap.set_time(self._t, pulse, subtitle)
         self.sky.set_time(self._t)
         self.pass_line.set_time(self._t)
         self.link.show_moment(self._track, self._t, self._item.obs.frequency_hz if self._item else None)
