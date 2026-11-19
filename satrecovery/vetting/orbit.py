@@ -253,7 +253,7 @@ class PassPrediction:
         # A transmitter that does not move (on the ground, or geostationary):
         # range rate 0, so after the station's correction it traces the mirror
         # image of the scheduled satellite's Doppler.  Local interference.
-        curves.append(Curve(0, "Fixed transmitter (ground interference)", "not a satellite", f_tuned, seconds,
+        curves.append(Curve(0, "Ground transmitter (fixed frequency)", "not a satellite", f_tuned, seconds,
                             doppler_offset_khz(f_tuned, np.zeros(samples), f_tuned, scheduled_rate),
                             np.full(samples, 90.0), np.zeros(samples)))
 
@@ -368,3 +368,98 @@ def fit_time_shift(prediction: PassPrediction, site: Site, track_seconds: np.nda
         if trial and (best is None or trial[0].score > best.score):
             best = trial[0]
     return best
+
+
+def tle_epoch(line1: str) -> datetime:
+    """The moment a TLE describes (columns 19-32 of line 1: year and day of year)."""
+    year, day = int(line1[18:20]), float(line1[20:32])
+    return datetime(2000 + year if year < 57 else 1900 + year, 1, 1, tzinfo=timezone.utc) + timedelta(days=day - 1)
+
+
+def plausible_time_error_s(obs: Observation) -> float:
+    """How far along its orbit a satellite could really be from where its TLE says.
+
+    Fresh orbit data for a tracked satellite is off by seconds; it grows by
+    roughly a minute a day.  Objects with temporary catalogue numbers
+    (90000 and up, usually just launched) can be minutes off.
+    """
+    if obs.tle is None or obs.start is None:
+        return 0.0
+    if (obs.norad_cat_id or 0) >= 90000:
+        return 600.0
+    age_days = max((obs.start - tle_epoch(obs.tle[0])).total_seconds() / 86400.0, 0.0)
+    return float(min(600.0, 30.0 + 60.0 * age_days))
+
+
+# ----------------------------------------------------------------------
+@dataclass(frozen=True)
+class TrackExplanation:
+    """What made the bright track on one waterfall, in words and numbers."""
+
+    obs: Observation
+    site: Site
+    prediction: PassPrediction
+    track_seconds: np.ndarray = field(repr=False)
+    track_khz: np.ndarray = field(repr=False)
+    matches: tuple[Match, ...]
+    timing: Match | None
+    verdict: str
+    detail: str
+    source: str   # "scheduled", "other", "ground", "timing", "unknown", "no track"
+
+
+class TrackExplainer:
+    """Runs the whole chain for one observation: axes, station, orbits, track, matches."""
+
+    MIN_POINTS = 8
+    CLEAR, POSSIBLE = 0.5, 0.35
+
+    def __init__(self, cache, catalog: SatnogsCatalog, stations: StationDirectory) -> None:
+        self._cache, self._catalog, self._stations = cache, catalog, stations
+
+    def explain(self, obs: Observation, power: np.ndarray, fit_timing: bool = True) -> TrackExplanation:
+        """``power``: the normalised, clipped waterfall (time, freq) as the window draws it."""
+        from .session import track_points
+
+        axes = self._cache.axes(obs)
+        if axes is None:
+            raise OrbitError("the waterfall's axes could not be read, so there is no kHz scale")
+        site = self._stations.site(obs)
+        prediction = PassPrediction.build(obs, axes, self._catalog, site)
+        rows, cols = track_points(power)
+        seconds, khz = axes.seconds(rows, power.shape[0]), axes.khz(cols, power.shape[1])
+        if len(rows) < self.MIN_POINTS:
+            return TrackExplanation(obs, site, prediction, seconds, khz, (), None, "No bright track to explain",
+                                    "Fewer than 8 strong moments in the pass.", "no track")
+        matches = tuple(match_track(prediction, seconds, khz, max_shift_khz=3.0))
+        # A timing error plus a frequency offset can bend to fit many S-curves,
+        # so only allow the error the orbit data could plausibly have.
+        limit = plausible_time_error_s(obs)
+        timing = (fit_time_shift(prediction, site, seconds, khz, max_shift_s=limit, step_s=max(2.0, limit / 60))
+                  if fit_timing and limit >= 10 else None)
+        verdict, detail, source = self._words(matches, timing, len(rows))
+        return TrackExplanation(obs, site, prediction, seconds, khz, matches, timing, verdict, detail, source)
+
+    def _words(self, matches: Sequence[Match], timing: Match | None, points: int) -> tuple[str, str, str]:
+        best = matches[0] if matches else None
+        if timing is not None and timing.share >= self.CLEAR and (best is None or timing.share > best.share + 0.15):
+            shift = timing.curve.name.rsplit("(", 1)[-1].split(" off")[0]
+            return (f"The scheduled satellite is {shift} off its orbit data",
+                    f"Shifting its orbit by {shift} puts {timing.share:.0%} of the track on the curve "
+                    f"(offset {timing.shift_khz:+.1f} kHz).", "timing")
+        if best is None or best.share < self.POSSIBLE:
+            share = f"{best.share:.0%}" if best else "none"
+            return ("No known source explains the track",
+                    f"Best fit covers {share} of {points} strong moments. An uncatalogued satellite, "
+                    f"or a transmitter not in SatNOGS DB.", "unknown")
+        certainty = "" if best.share >= self.CLEAR else "probably "
+        detail = f"{best.share:.0%} of the track's {points} strong moments lie on its curve (offset {best.shift_khz:+.1f} kHz)."
+        if best.curve.scheduled:
+            return f"Track is {certainty}the scheduled satellite", detail, "scheduled"
+        if best.curve.name.endswith("(today's orbit)"):
+            return (f"Track is {certainty}the scheduled satellite, on its newest orbit data",
+                    detail + " The station used older orbit data, so the track is slightly off centre.", "scheduled")
+        if best.curve.norad == 0:
+            return f"Track is {certainty}ground interference, not a satellite", \
+                   detail + " A fixed transmitter traces the mirror of the satellite's Doppler.", "ground"
+        return f"Track is {certainty}{best.curve.name}, not the scheduled satellite", detail, "other"

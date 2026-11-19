@@ -313,6 +313,10 @@ class VettingSession:
                               f"observations")
 
     # ------------------------------------------------------------------
+    @property
+    def cache(self) -> ArtifactCache:
+        return self._cache
+
     def count(self, mode: str) -> int:
         return sum(1 for i in self._all if (i.known if mode == "test" else not i.known))
 

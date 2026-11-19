@@ -23,3 +23,6 @@ pyqtgraph>=0.13
 # Tests
 pytest>=8.0
 httpx>=0.27
+
+# Orbit view (SatNOGS vetting)
+skyfield>=1.49

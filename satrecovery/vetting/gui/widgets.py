@@ -181,30 +181,86 @@ class Scope(pg.GraphicsLayoutWidget):
                 axis.setTextPen(text_pen)
                 axis.enableAutoSIPrefix(False)  # no "(x0.001)" scale labels
         self.show_track = True
+        self.show_curves = True
+        self._curve_items: list = []
+        self._labels: list = []
 
-    def show(self, power: np.ndarray, duration_s: float | None) -> None:  # noqa: A003 - Qt naming
+        # A horizontal line that follows the mouse: "this moment of the pass".
+        self.cursor = pg.InfiniteLine(angle=0, pen=pg.mkPen(theme.TEXT, width=1, style=Qt.DotLine))
+        self.cursor.setVisible(False)
+        self.plot.addItem(self.cursor)
+        self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
+        self.on_hover = None   # callable(seconds) set by the window
+
+    def _mouse_moved(self, position) -> None:
+        if not self.plot.sceneBoundingRect().contains(position):
+            return
+        seconds = float(self.plot.vb.mapSceneToView(position).y())
+        self.cursor.setValue(seconds)
+        self.cursor.setVisible(True)
+        if self.on_hover:
+            self.on_hover(seconds)
+
+    def show(self, power: np.ndarray, duration_s: float | None, axes=None) -> None:  # noqa: A003 - Qt naming
+        """Draw a waterfall.  With ``axes`` (a WaterfallAxes) it is drawn in real kHz and seconds."""
         n_time, n_freq = power.shape
-        height = float(duration_s) if duration_s else float(n_time)
         self.image.setImage(power, levels=(-2.0, 6.0))
-        self.image.setRect(QRectF(0, 0, n_freq, height))
-        seconds = (np.arange(n_time) + 0.5) * height / n_time
+        self.clear_curves()
+        if axes is not None:
+            left, right = axes.khz_left, axes.khz_right
+            bottom, top = axes.seconds_bottom, axes.seconds_top
+            self.below.setLabel("bottom", "frequency offset, kHz  (0 = where the scheduled satellite should be)")
+        else:
+            left, right = 0.0, float(n_freq)
+            bottom, top = 0.0, float(duration_s) if duration_s else float(n_time)
+            self.below.setLabel("bottom", "frequency  (centre = where the scheduled satellite should be)")
+        for plot in (self.plot, self.below):
+            plot.getAxis("bottom").setStyle(showValues=axes is not None)
+        self.image.setRect(QRectF(left, bottom, right - left, top - bottom))
+        x_of = lambda col: left + (np.asarray(col, float) + 0.5) / n_freq * (right - left)  # noqa: E731
+        seconds = bottom + (np.arange(n_time) + 0.5) / n_time * (top - bottom)
 
         edge = n_freq // 8
         inner = n_freq - 2 * edge
         centre = edge + inner / 2
         half = max(inner // 20, 2)
-        for line, x in zip(self.centre_lines, (centre - half, centre + half)):
-            line.setValue(x)
+        for line, col in zip(self.centre_lines, (centre - half, centre + half)):
+            line.setValue(float(x_of(col - 0.5)))
         band = power[:, int(centre - half):int(centre + half)].mean(axis=1)
         self.side_curve.setData(band, seconds)
-        self.below_curve.setData(np.arange(n_freq) + 0.5, power.mean(axis=0))
+        self.below_curve.setData(x_of(np.arange(n_freq)), power.mean(axis=0))
 
         rows, cols = track_points(power)
         if self.show_track and len(rows):
-            self.track.setData(cols + 0.5, seconds[rows])
+            self.track.setData(x_of(cols), seconds[rows])
         else:
             self.track.clear()
-        self.plot.setRange(xRange=(0, n_freq), yRange=(0, height), padding=0)
+        self.plot.setRange(xRange=(left, right), yRange=(bottom, top), padding=0)
+
+    # -- predicted tracks ------------------------------------------------
+    def clear_curves(self) -> None:
+        for item in self._curve_items + self._labels:
+            self.plot.removeItem(item)
+        self._curve_items, self._labels = [], []
+
+    def draw_curves(self, curves: list[tuple[np.ndarray, np.ndarray, str, str, bool]]) -> None:
+        """``(khz, seconds, colour, label, emphasised)`` for each predicted track."""
+        self.clear_curves()
+        if not self.show_curves:
+            return
+        for khz, seconds, colour, label, strong in curves:
+            if len(khz) < 2:
+                continue
+            pen = pg.mkPen(colour, width=2.2 if strong else 1.1,
+                           style=Qt.SolidLine if strong else Qt.DashLine)
+            item = pg.PlotDataItem(khz, seconds, pen=pen)
+            self.plot.addItem(item)
+            self._curve_items.append(item)
+            text = pg.TextItem(label, color=colour, anchor=(0.5, 1.2))
+            text.setFont(QFont(theme.MONO, 8))
+            text.setPos(float(khz[-1]), float(seconds[-1]))
+            self.plot.addItem(text)
+            self._labels.append(text)
 
 
 # ----------------------------------------------------------------------

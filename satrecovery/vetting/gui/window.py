@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from ..observation import WaterfallLabel
 from ..session import Policy, Verdict, VettingSession
 from . import theme
+from .orbit_view import OrbitPanel
 from .widgets import Meter, ProbabilityDelegate, QueueModel, Reasons, Scope, caps, rule, verdict_text
 
 SATNOGS_OBSERVATION = "https://network.satnogs.org/observations/{}/"
@@ -61,9 +62,10 @@ class Counter(QWidget):
 
 
 class VettingWindow(QMainWindow):
-    def __init__(self, session: VettingSession) -> None:
+    def __init__(self, session: VettingSession, explainer=None) -> None:
         super().__init__()
         self._session = session
+        self._explainer = explainer
         self._current: int | None = None
         self.setWindowTitle("SatNOGS vetting station")
         self.resize(1440, 860)
@@ -86,14 +88,20 @@ class VettingWindow(QMainWindow):
         splitter.setHandleWidth(1)
         splitter.addWidget(self._queue_panel())
         self.scope = Scope()
-        splitter.addWidget(self.scope)
+        middle = QSplitter(Qt.Vertical)
+        middle.setHandleWidth(1)
+        middle.addWidget(self.scope)
+        self.orbit = OrbitPanel(explainer, self.scope)
+        middle.addWidget(self.orbit)
+        middle.setSizes([600, 240])
+        splitter.addWidget(middle)
         splitter.addWidget(self._detail_panel())
         splitter.setSizes([440, 680, 320])
         outer.addWidget(splitter, 1)
         self.setCentralWidget(root)
         self.statusBar().showMessage(
             "G signal   B no signal   A accept suggestion   J/K next/previous   N next unsure   "
-            "T track on/off   V show volunteer's answer   decisions are saved as you go")
+            "T track   O orbit curves   V volunteer's answer   hover the waterfall to move the sky chart")
 
         self._keys()
         self._update_mode()
@@ -264,6 +272,7 @@ class VettingWindow(QMainWindow):
             "N": self._next_unsure,
             "T": self._toggle_track,
             "V": lambda: self.reveal.toggle(),
+            "O": self._toggle_curves,
         }
         self._shortcuts = []
         for key, action in bindings.items():
@@ -297,7 +306,11 @@ class VettingWindow(QMainWindow):
         self.meter.set_value(item.probability, self._session.policy.low, self._session.policy.high, item.verdict.value)
         self.reasons.set_reasons(self._session.reasons(obs.id))
         try:
-            self.scope.show(self._session.waterfall(obs.id), obs.duration_s)
+            power = self._session.waterfall(obs.id)
+            # The kHz scale, if already known (no network here: the orbit worker fetches it).
+            axes = self._session.cache.axes(obs, download=False)
+            self.scope.show(power, obs.duration_s, axes)
+            self.orbit.show_observation(obs, power)
         except Exception as error:  # a damaged cache file should not close the window
             self.statusBar().showMessage(f"Could not draw {obs.id}: {error}", 6000)
         self._show_decision()
@@ -417,6 +430,10 @@ class VettingWindow(QMainWindow):
     def _next_unsure(self) -> None:
         self._next_where(lambda item: item.verdict is Verdict.UNSURE and self._session.decision(item.obs.id) is None)
 
+    def _toggle_curves(self) -> None:
+        self.scope.show_curves = not self.scope.show_curves
+        self._show_row(self.table.currentIndex().row())
+
     def _toggle_track(self) -> None:
         self.scope.show_track = not self.scope.show_track
         self._show_row(self.table.currentIndex().row())
@@ -448,3 +465,13 @@ class VettingWindow(QMainWindow):
     def _open_satnogs(self) -> None:
         if self._current is not None:
             QDesktopServices.openUrl(QUrl(SATNOGS_OBSERVATION.format(self._current)))
+
+    def select(self, obs_id: int) -> None:
+        """Open a given observation, switching mode if needed."""
+        item = self._session.item(obs_id)
+        mode = "test" if item.known else "unvetted"
+        if mode != self._session.mode:
+            self._set_mode(mode)
+        row = self.model.row_of(obs_id)
+        if row >= 0:
+            self.table.selectRow(row)

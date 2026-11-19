@@ -127,7 +127,7 @@ class TestPassPrediction:
         prediction = PassPrediction.build(obs, WaterfallAxes(-24, 24, 0, 600), catalog, SITE)
         names = [c.name for c in prediction.curves]
         assert prediction.curves[0].scheduled and np.allclose(prediction.curves[0].khz, 0)
-        assert any("ground" in n for n in names)
+        assert any("ground" in n.lower() for n in names)
         satellites = [c for c in prediction.others() if c.norad == 69015]
         assert len(satellites) == 1 and np.allclose(satellites[0].khz, 8.0, atol=0.05)  # same orbit, 8 kHz up
 
@@ -194,3 +194,47 @@ class TestAxesCache:
                                                     "seconds_bottom": 0, "seconds_top": 400}))
         assert cache.axes(obs) == WaterfallAxes(-24, 24, 0, 400)
         assert cache.axes(Observation.from_api({"id": 6}), download=True) is None  # no waterfall to fetch
+
+
+class TestVerdicts:
+    """The words the window shows, for each kind of source."""
+
+    def _match(self, name, share, norad=5, scheduled=False):
+        seconds = np.linspace(0, 10, 3)
+        curve = Curve(norad, name, "", 1.0, seconds, seconds, seconds, seconds, scheduled)
+        from satrecovery.vetting.orbit import Match
+
+        return Match(curve, share, 0.0, 20)
+
+    def _words(self, matches, timing=None):
+        from satrecovery.vetting.orbit import TrackExplainer
+
+        return TrackExplainer(None, None, None)._words(matches, timing, 30)  # type: ignore[arg-type]
+
+    def test_each_source_has_its_own_words(self):
+        assert self._words([self._match("ORESAT (as scheduled)", 0.8, scheduled=True)])[2] == "scheduled"
+        assert self._words([self._match("ORESAT (today's orbit)", 0.8)])[2] == "scheduled"
+        verdict, _, source = self._words([self._match("Ground transmitter (fixed frequency)", 0.9, norad=0)])
+        assert source == "ground" and "interference" in verdict
+        verdict, _, source = self._words([self._match("GEMINI-POLLUX", 0.42)])
+        assert source == "other" and "probably GEMINI-POLLUX" in verdict
+        assert self._words([self._match("GEMINI-POLLUX", 0.1)])[2] == "unknown"
+        assert self._words([])[2] == "unknown"
+
+    def test_timing_wins_only_when_clearly_better(self):
+        best = self._match("GEMINI-POLLUX", 0.5)
+        assert self._words([best], self._match("ORESAT (+40 s off its orbit)", 0.6, scheduled=True))[2] == "other"
+        verdict, _, source = self._words([best], self._match("ORESAT (+40 s off its orbit)", 0.8, scheduled=True))
+        assert source == "timing" and "+40 s" in verdict
+
+    def test_plausible_timing_error_grows_with_age(self):
+        from satrecovery.vetting.orbit import plausible_time_error_s, tle_epoch
+
+        epoch = tle_epoch(TLE[0])
+        assert epoch.year == 2026 and epoch.month == 11
+        fresh = observation_at(epoch + timedelta(hours=6))
+        stale = observation_at(epoch + timedelta(days=4))
+        assert plausible_time_error_s(fresh) < plausible_time_error_s(stale) <= 600
+        new_launch = Observation.from_api({"id": 3, "norad_cat_id": 98528, "start": "2026-11-20T00:00:00Z",
+                                           "tle1": TLE[0], "tle2": TLE[1]})
+        assert plausible_time_error_s(new_launch) == 600

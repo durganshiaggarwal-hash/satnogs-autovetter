@@ -57,6 +57,9 @@ QComboBox QAbstractItemView {{ background: {RAISED}; selection-background-color:
 QCheckBox {{ color: {DIM}; font-size: 11px; }}
 QStatusBar {{ background: {PANEL}; color: {DIM}; font-family: "{MONO}"; font-size: 10px; border-top: 1px solid {RULE}; }}
 QSplitter::handle {{ background: {RULE}; }}
+QSlider::groove:horizontal {{ height: 2px; background: {RULE}; }}
+QSlider::sub-page:horizontal {{ background: {RULE}; }}
+QSlider::handle:horizontal {{ background: {ACCENT}; width: 8px; margin: -6px 0; border-radius: 2px; }}
 QScrollBar:vertical {{ background: {PANEL}; width: 8px; }}
 QScrollBar::handle:vertical {{ background: {RULE}; border-radius: 4px; min-height: 24px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
