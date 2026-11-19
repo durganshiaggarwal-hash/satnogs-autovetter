@@ -60,21 +60,36 @@ def main(argv: list[str] | None = None) -> int:
     source = SatnogsApiSource()
     print(f"Saving to {out}  (already have {len(manifest)}: {manifest.counts() or 'nothing'})")
 
+    # Both labels are fetched in turn, one observation each, so the data is
+    # balanced at every moment and a model can be trained before the end.
     started = time.time()
-    for label in (WaterfallLabel.SIGNAL, WaterfallLabel.NO_SIGNAL):
-        have = Counter(o.norad_cat_id for o in manifest if o.waterfall_label is label)
-        kept = sum(have.values())
-        seen = skipped = failed = 0
-        print(f"\n{label.value}: have {kept}, want {args.per_label}")
-        try:
-            for obs in source.fetch(ObservationQuery(waterfall_label=label, end=args.before)):
-                if kept >= args.per_label:
-                    break
-                seen += 1
-                if obs.id in manifest:
-                    continue
-                if not obs.is_trainable or have[obs.norad_cat_id] >= args.max_per_satellite:
-                    skipped += 1
+    labels = (WaterfallLabel.SIGNAL, WaterfallLabel.NO_SIGNAL)
+    streams = {label: source.fetch(ObservationQuery(waterfall_label=label, end=args.before)) for label in labels}
+    have = {label: Counter(o.norad_cat_id for o in manifest if o.waterfall_label is label) for label in labels}
+    kept = {label: sum(have[label].values()) for label in labels}
+    seen = skipped = failed = 0
+    last_report = sum(kept.values())
+
+    def next_usable(label: WaterfallLabel):
+        nonlocal seen, skipped
+        for obs in streams[label]:
+            seen += 1
+            if obs.id in manifest:
+                continue
+            if not obs.is_trainable or have[label][obs.norad_cat_id] >= args.max_per_satellite:
+                skipped += 1
+                continue
+            return obs
+        return None
+
+    try:
+        active = [label for label in labels if kept[label] < args.per_label]
+        while active:
+            for label in list(active):
+                obs = next_usable(label)
+                if obs is None:
+                    print(f"  {label.value}: SatNOGS has no more; stopping at {kept[label]}")
+                    active.remove(label)
                     continue
                 try:
                     cache.waterfall(obs)
@@ -85,18 +100,19 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  skip {obs.id}: {error}")
                     continue
                 manifest.add(obs)
-                have[obs.norad_cat_id] += 1
-                kept += 1
-                if kept % 25 == 0:
-                    print(f"  {kept}/{args.per_label} kept  ({seen} looked at, {skipped} skipped, "
-                          f"{failed} failed, {len(have)} satellites, {time.time() - started:.0f} s)")
-        except KeyboardInterrupt:
-            print("\nStopped. Run again to carry on where it left off.")
-            break
-        except SatnogsError as error:
-            print(f"  SatNOGS problem: {error}. Run again later to carry on.")
-            break
-        print(f"  done: {kept} kept from {len(have)} satellites")
+                have[label][obs.norad_cat_id] += 1
+                kept[label] += 1
+                if kept[label] >= args.per_label:
+                    active.remove(label)
+            total = sum(kept.values())
+            if total - last_report >= 50:
+                last_report = total
+                print(f"  {kept[labels[0]]} with / {kept[labels[1]]} without signal  ({seen} looked at, "
+                      f"{skipped} skipped, {failed} failed, {time.time() - started:.0f} s)", flush=True)
+    except KeyboardInterrupt:
+        print("\nStopped. Run again to carry on where it left off.")
+    except SatnogsError as error:
+        print(f"  SatNOGS problem: {error}. Run again later to carry on.")
 
     print(f"\nManifest: {manifest.path}  ({len(manifest)} observations: {manifest.counts()})")
     print(f"API pages requested: {source.requests_made}.  Took {time.time() - started:.0f} s.")

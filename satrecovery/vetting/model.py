@@ -42,15 +42,37 @@ def _build_network(channels: tuple[int, ...], size: int):
     import torch.nn as nn
     import torch.nn.functional as F
 
+    # GroupNorm, not BatchNorm: BatchNorm's running averages are still
+    # settling in the early epochs that early stopping often restores on a
+    # small dataset, and then the restored model answers the same thing for
+    # every picture in eval mode (measured: 86% in train mode, 36% in eval).
+    # GroupNorm has no running state, so train and eval agree.
+    def norm(width: int):
+        return nn.GroupNorm(min(8, width), width)
+
+    class Augment(nn.Module):
+        """Training only: flip time and frequency, shift frequency a little."""
+
+        def forward(self, x):
+            if not self.training:
+                return x
+            n = x.shape[0]
+            flip_t = torch.rand(n, device=x.device) < 0.5
+            flip_f = torch.rand(n, device=x.device) < 0.5
+            x = torch.where(flip_t[:, None, None, None], x.flip(-2), x)
+            x = torch.where(flip_f[:, None, None, None], x.flip(-1), x)
+            shift = int(torch.randint(-x.shape[-1] // 16, x.shape[-1] // 16 + 1, (1,)))
+            return torch.roll(x, shifts=shift, dims=-1)
+
     class Block(nn.Module):
         def __init__(self, width_in: int, width_out: int, stride: int) -> None:
             super().__init__()
             self.conv1 = nn.Conv2d(width_in, width_out, 3, stride, 1, bias=False)
-            self.bn1 = nn.BatchNorm2d(width_out)
+            self.bn1 = norm(width_out)
             self.conv2 = nn.Conv2d(width_out, width_out, 3, 1, 1, bias=False)
-            self.bn2 = nn.BatchNorm2d(width_out)
+            self.bn2 = norm(width_out)
             self.skip = (nn.Identity() if stride == 1 and width_in == width_out else
-                         nn.Sequential(nn.Conv2d(width_in, width_out, 1, stride, bias=False), nn.BatchNorm2d(width_out)))
+                         nn.Sequential(nn.Conv2d(width_in, width_out, 1, stride, bias=False), norm(width_out)))
 
         def forward(self, x):
             out = F.relu(self.bn1(self.conv1(x)))
@@ -60,8 +82,9 @@ def _build_network(channels: tuple[int, ...], size: int):
         def __init__(self) -> None:
             super().__init__()
             self.size = size
+            self.augment = Augment()
             self.stem = nn.Sequential(nn.Conv2d(1, channels[0], 5, 2, 2, bias=False),
-                                      nn.BatchNorm2d(channels[0]), nn.ReLU())
+                                      norm(channels[0]), nn.ReLU())
             layers, width = [], channels[0]
             for out in channels:
                 layers.append(Block(width, out, 2))
@@ -72,7 +95,9 @@ def _build_network(channels: tuple[int, ...], size: int):
         def forward(self, x):
             if x.shape[-2:] != (self.size, self.size):
                 x = F.adaptive_avg_pool2d(x, (self.size, self.size))
-            x = self.blocks(self.stem(x))
+            # The band edges are far below the median (about -6 spreads);
+            # clipping keeps them from dominating the first layer.
+            x = self.blocks(self.stem(self.augment(x.clamp(-4.0, 8.0))))
             return self.head(torch.flatten(F.adaptive_avg_pool2d(x, 1), 1))
 
     return Network()
