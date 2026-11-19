@@ -303,3 +303,75 @@ class TestArtifactCache:
         obs = Observation.from_api(api_row(8))
         cache = ArtifactCache(tmp_path, FakeTransport({obs.audio_url: Response(200, {}, b"OggS...")}))
         assert cache.audio(obs).read_bytes() == b"OggS..."
+
+
+# ----------------------------------------------------------------------
+from satrecovery.vetting.axes import AxisReadError, GlyphReader, read_axes, read_axes_png  # noqa: E402
+
+
+def render_layout(khz: float, seconds: float, right_axis: bool, dpi: int = 100) -> np.ndarray:
+    """A waterfall drawn like SatNOGS: old layout (seconds on the left) or new (clock left, seconds right)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rng = np.random.default_rng(0)
+    fig, ax = plt.subplots(figsize=(6, 11), dpi=dpi)
+    shown = ax.imshow(0.35 + 0.1 * rng.random((200, 120)), aspect="auto", origin="lower", cmap="viridis",
+                      vmin=0, vmax=1, interpolation="nearest", extent=(-khz, khz, 0, seconds))
+    ax.set_xlabel("Frequency (kHz)")
+    if right_axis:
+        ax.set_yticks(np.linspace(0, seconds, 6))
+        ax.set_yticklabels([f"12:{30 + i:02d}" for i in range(6)])
+        twin = ax.twinx()
+        twin.set_ylim(0, seconds)
+        twin.set_ylabel("Time (seconds)")
+    else:
+        ax.set_ylabel("Time (seconds)")
+    fig.colorbar(shown, ax=ax, label="Power (dB)", pad=0.12 if right_axis else 0.05)
+    fig.canvas.draw()
+    rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3] / 255.0
+    plt.close(fig)
+    return rgb.astype(np.float32)
+
+
+class TestAxes:
+    @pytest.mark.parametrize("khz,seconds,right", [(24.0, 400.0, False), (28.8, 226.0, True), (38.4, 799.0, True)])
+    def test_reads_both_layouts(self, khz, seconds, right):
+        axes = read_axes(render_layout(khz, seconds, right))
+        assert axes.khz_left == pytest.approx(-khz, rel=0.02)
+        assert axes.khz_right == pytest.approx(khz, rel=0.02)
+        assert axes.seconds_bottom == pytest.approx(0.0, abs=seconds * 0.01)
+        assert axes.seconds_top == pytest.approx(seconds, rel=0.01)
+
+    def test_reads_every_digit(self):
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from satrecovery.vetting.axes import read_labels
+
+        fig = plt.figure(figsize=(6, 0.4), dpi=100)
+        fig.text(0.02, 0.3, "−1234   5678   90   −3.5", fontsize=10)
+        fig.canvas.draw()
+        rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3] / 255.0
+        plt.close(fig)
+        texts = [l.text for l in sorted(read_labels(rgb.mean(axis=2) < 0.45), key=lambda l: l.x)]
+        assert texts == ["−1234", "5678", "90", "−3.5"]
+
+    def test_grid_conversions(self):
+        from satrecovery.vetting.axes import WaterfallAxes
+
+        axes = WaterfallAxes(-24.0, 24.0, 0.0, 400.0)
+        assert axes.khz(127.5, 256) == pytest.approx(0.0)
+        assert axes.column(axes.khz(40, 256), 256) == pytest.approx(40)
+        assert axes.seconds(255, 256) == pytest.approx(400 * 255.5 / 256)
+
+    def test_refuses_a_picture_without_labels(self, known_spectrum):
+        rgb = np.full((300, 200, 3), 1.0, dtype=np.float32)
+        from matplotlib import colormaps
+
+        rgb[20:260, 30:170] = colormaps["viridis"](np.resize(known_spectrum, (240, 140)))[:, :, :3]
+        with pytest.raises(AxisReadError):
+            read_axes(rgb)

@@ -65,10 +65,40 @@ def _longest_run(flags: np.ndarray) -> tuple[int, int]:
     return best
 
 
+TOLERANCE = 0.03
+COVERAGE = 0.9
+
+
+def _locate(rgb: np.ndarray) -> tuple[int, int, int, int, np.ndarray]:
+    """``(row0, row1, col0, col1, colour-map index of every pixel)`` of the plot."""
+    _, tree = _colour_map()
+    height, width, _ = rgb.shape
+    distance, index = tree.query(rgb.reshape(-1, 3), k=1)
+    on_map = (distance < TOLERANCE).reshape(height, width)
+
+    # Columns first, judged against the best column: margins above and
+    # below the plot differ between pictures, so no fixed share works.
+    column_cover = on_map.mean(axis=0)
+    if column_cover.max() < 0.25:
+        raise WaterfallDecodeError("no plot area found (hardly any viridis colours)")
+    col0, col1 = _longest_run(column_cover > COVERAGE * column_cover.max())
+    if col1 - col0 < 16:
+        raise WaterfallDecodeError("no plot area found (no wide block of viridis colours)")
+    row0, row1 = _longest_run(on_map[:, col0:col1].mean(axis=1) > COVERAGE)
+    if row1 - row0 < 16:
+        raise WaterfallDecodeError("no plot area found (no tall block of viridis colours)")
+    return row0, row1, col0, col1, index.reshape(height, width)
+
+
+def locate_plot(rgb: np.ndarray) -> tuple[int, int, int, int]:
+    """``(row0, row1, col0, col1)``: the plot inside a waterfall picture (end-exclusive)."""
+    return _locate(rgb)[:4]
+
+
 class WaterfallImage:
     """A waterfall as relative power, ``shape == (time_bins, freq_bins)``."""
 
-    #: a pixel within this RGB distance of a viridis colour counts as "plot"
+    #: kept for compatibility; the module-level values are used
     TOLERANCE = 0.03
     #: a row/column is part of the plot if this share of it is viridis
     COVERAGE = 0.9
@@ -98,24 +128,8 @@ class WaterfallImage:
 
     @classmethod
     def from_rgb(cls, rgb: np.ndarray) -> "WaterfallImage":
-        _, tree = _colour_map()
-        height, width, _ = rgb.shape
-        distance, index = tree.query(rgb.reshape(-1, 3), k=1)
-        on_map = (distance < cls.TOLERANCE).reshape(height, width)
-
-        # Columns first, judged against the best column: margins above and
-        # below the plot differ between pictures, so no fixed share works.
-        column_cover = on_map.mean(axis=0)
-        if column_cover.max() < 0.25:
-            raise WaterfallDecodeError("no plot area found (hardly any viridis colours)")
-        col0, col1 = _longest_run(column_cover > cls.COVERAGE * column_cover.max())
-        if col1 - col0 < 16:
-            raise WaterfallDecodeError("no plot area found (no wide block of viridis colours)")
-        row0, row1 = _longest_run(on_map[:, col0:col1].mean(axis=1) > cls.COVERAGE)
-        if row1 - row0 < 16:
-            raise WaterfallDecodeError("no plot area found (no tall block of viridis colours)")
-
-        power = (index.reshape(height, width)[row0:row1, col0:col1] / 255.0).astype(np.float32)
+        row0, row1, col0, col1, index = _locate(rgb)
+        power = (index[row0:row1, col0:col1] / 255.0).astype(np.float32)
         return cls(power[::-1])  # start of the pass first
 
     # ------------------------------------------------------------------
