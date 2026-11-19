@@ -71,52 +71,66 @@ def fetch_latest(source: ObservationSource, cache: ArtifactCache, manifest: Mani
                  max_age_hours: float = 48.0, workers: int = 4, look_at: int | None = None,
                  progress: Callable[[str], None] | None = None,
                  added: Callable[[Observation], None] | None = None) -> int:
-    """The newest ``count`` finished recordings: listed one API page a second, then downloaded in parallel.
+    """The newest ``count`` finished recordings, each downloaded as soon as it is listed.
 
-    The listing goes to the API (rate-limited); the waterfall files come from
-    SatNOGS's file servers, so a few at once is fine.  ``added`` is called
-    for each recording as soon as its waterfall is in the cache.
+    Listing goes to the API (one page a second); each recording's waterfall
+    is downloaded from SatNOGS's file servers on a small pool of workers
+    *while* the listing continues, so the first ones are ready in seconds.
+    ``added`` is called for each recording once its waterfall is in the cache.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
 
     now = datetime.now(timezone.utc)
     oldest = now - timedelta(hours=max_age_hours)
     query = ObservationQuery(end=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
     look_at = look_at or count * 6
-    wanted: list[Observation] = []
-    seen = 0
+    lock = threading.Lock()
+    state = {"done": 0, "wanted": 0, "seen": 0}
+    stop = threading.Event()
+
+    def download(obs: Observation) -> None:
+        if stop.is_set():
+            return
+        try:
+            cache.waterfall(obs)
+        except (ArtifactError, SatnogsError, OSError) as error:
+            if progress:
+                progress(f"skip {obs.id}: {error}")
+            return
+        with lock:
+            manifest.add(obs)
+            state["done"] += 1
+            done = state["done"]
+        if added:
+            added(obs)
+        if progress and done % 10 == 0:
+            progress(f"{done} downloaded, {state['seen']} listed")
+
+    pool = ThreadPoolExecutor(max_workers=max(1, workers))
     try:
         for obs in source.fetch(query):
-            seen += 1
-            if len(wanted) >= count or seen > look_at or (obs.start is not None and obs.start < oldest):
+            state["seen"] += 1
+            if state["wanted"] >= count or state["seen"] > look_at or (obs.start is not None and obs.start < oldest):
                 break
-            if is_finished_recording(obs):
-                wanted.append(obs)
+            if not is_finished_recording(obs):
+                continue
+            state["wanted"] += 1
+            if obs.id in manifest and cache.has_waterfall(obs):
+                with lock:
+                    state["done"] += 1
+                if added:
+                    added(obs)
+                continue
+            pool.submit(download, obs)
+            if progress and state["seen"] % 25 == 0:
+                progress(f"listing: {state['seen']} looked at, {state['wanted']} to fetch, {state['done']} ready")
     except SatnogsError as error:
         if progress:
             progress(f"SatNOGS problem while listing: {error}")
-    if progress:
-        progress(f"found {len(wanted)} recent recordings ({seen} looked at); downloading")
-
-    def download(obs: Observation) -> Observation:
-        cache.waterfall(obs)
-        return obs
-
-    done = 0
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        jobs = {pool.submit(download, obs): obs for obs in wanted}
-        for job in as_completed(jobs):
-            obs = jobs[job]
-            try:
-                job.result()
-            except (ArtifactError, SatnogsError, OSError) as error:
-                if progress:
-                    progress(f"skip {obs.id}: {error}")
-                continue
-            manifest.add(obs)
-            done += 1
-            if added:
-                added(obs)
-            if progress and done % 10 == 0:
-                progress(f"{done}/{len(wanted)} downloaded")
-    return done
+    except BaseException:
+        stop.set()          # e.g. the window closed: let queued downloads end at once
+        raise
+    finally:
+        pool.shutdown(wait=True)
+    return state["done"]

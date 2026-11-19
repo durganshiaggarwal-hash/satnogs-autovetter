@@ -486,9 +486,10 @@ class VettingWindow(QMainWindow):
     def select(self, obs_id: int) -> None:
         """Open a given observation, switching mode if needed."""
         item = self._session.item(obs_id)
-        mode = "test" if item.known else "unvetted"
-        if mode != self._session.mode:
-            self._set_mode(mode)
+        if "latest" not in self._session.modes:       # the live app has one queue; only switch when there are two
+            mode = "test" if item.known else "unvetted"
+            if mode != self._session.mode:
+                self._set_mode(mode)
         row = self.model.row_of(obs_id)
         if row >= 0:
             self.table.selectRow(row)

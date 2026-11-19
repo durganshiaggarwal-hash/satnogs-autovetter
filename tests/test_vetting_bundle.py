@@ -112,3 +112,38 @@ class TestLatestFeed:
         listing.add(obs)
         WaterfallImage(synthetic(True, np.random.default_rng(1))).save(cache.waterfall_path(obs))
         assert fetch_latest(ManifestSource(listing), cache, Manifest(tmp_path / "l.jsonl"), 10, max_age_hours=48) == 0
+
+
+pytest.importorskip("PySide6")
+
+
+def test_expert_mode_opens_from_a_replay_in_the_live_app(trained):
+    """Regression: the live app has one 'latest' queue, and select() tried to switch to 'unvetted'."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from satrecovery.vetting.gui.mission import MissionWindow
+
+    app = QApplication.instance() or QApplication([])
+    bundle, cache, root, rng = trained
+    obs = observation(700)
+    WaterfallImage(synthetic(True, rng)).save(cache.waterfall_path(obs))
+    session = VettingSession.from_bundle(bundle, [obs], cache)
+    win = MissionWindow(session, explainer=None)
+    try:
+        win.open_replay(obs.id)
+        win.open_expert(obs.id)
+        assert win._expert is not None and win._expert._current == obs.id  # noqa: SLF001
+    finally:
+        win.close()
+        win.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+
+
+def test_feed_stops_quietly_when_its_window_is_gone(tmp_path):
+    from satrecovery.vetting.gui.live import LiveFeed, _Closed
+
+    feed = LiveFeed(ArtifactCache(tmp_path), Manifest(tmp_path / "l.jsonl"))
+    feed.stop()
+    assert feed.stopped and issubclass(_Closed, Exception)

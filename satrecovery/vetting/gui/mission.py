@@ -981,6 +981,13 @@ class MissionWindow(QMainWindow):
         if self._expert is not None:
             self._expert.refresh_queue()
 
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if self._feed is not None:
+            self._feed.stop()
+        if self._expert is not None:
+            self._expert.close()
+        super().closeEvent(event)
+
     def open_replay(self, obs_id: int) -> None:
         self.stack.setCurrentWidget(self.replay)
         self.replay.load(obs_id)
