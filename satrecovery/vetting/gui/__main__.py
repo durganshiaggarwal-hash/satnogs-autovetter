@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expert", action="store_true", help="open the vetting station (expert mode) directly")
     parser.add_argument("--replay", type=int, help="open the replay of this observation")
     parser.add_argument("--screen", choices=("intro", "home"), help="open on this screen (default: intro)")
+    parser.add_argument("--at", type=float, help="with --replay --screenshot: pause this far into the pass (0..1)")
     args = parser.parse_args(argv)
 
     from PySide6.QtCore import QTimer
@@ -74,7 +75,10 @@ def main(argv: list[str] | None = None) -> int:
             QThreadPool.globalInstance().waitForDone(30000)
             app.processEvents()
             if hasattr(window, "replay") and args.replay:
-                window.replay.finish()
+                if args.at is not None:
+                    window.replay.seek(args.at)
+                else:
+                    window.replay.finish()
             app.processEvents()
             app.processEvents()
             window.grab().save(args.screenshot)

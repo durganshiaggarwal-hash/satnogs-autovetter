@@ -492,6 +492,7 @@ class GroundTrack:
     height_km: np.ndarray = field(repr=False)
     elevation: np.ndarray = field(repr=False)   # as seen from the station
     footprint_deg: np.ndarray = field(repr=False)
+    range_km: np.ndarray | None = field(default=None, repr=False)   # station to satellite, straight line
 
 
 def ground_track(tle: tuple[str, str], site: Site, start: datetime, seconds: np.ndarray) -> GroundTrack:
@@ -503,7 +504,10 @@ def ground_track(tle: tuple[str, str], site: Site, start: datetime, seconds: np.
     where = satellite.at(t)
     below = wgs84.subpoint_of(where)
     height = np.atleast_1d(wgs84.height_of(where).km)
-    _, elevation, _ = look(tle, site, [start + timedelta(seconds=float(s)) for s in seconds])
+    place = wgs84.latlon(site.lat, site.lng, elevation_m=site.alt_m)
+    seen = (satellite - place).at(t)
+    elevation = np.atleast_1d(seen.altaz()[0].degrees)
+    distance = np.atleast_1d(seen.distance().km)
     footprint = np.degrees(np.arccos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + np.maximum(height, 1.0))))
     return GroundTrack(np.asarray(seconds, float), np.atleast_1d(below.latitude.degrees),
-                       np.atleast_1d(below.longitude.degrees), height, elevation, footprint)
+                       np.atleast_1d(below.longitude.degrees), height, elevation, footprint, distance)

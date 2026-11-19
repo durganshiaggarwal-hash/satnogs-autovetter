@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 
 from ..orbit import GroundTrack, OrbitError, TrackExplanation, ground_track
 from ..session import Item, Verdict, VettingSession
+from ..narration import PassNarrator, Places
 from ..story import Story, tell
 from . import theme
 from .orbit_view import OrbitWorker
@@ -99,6 +100,7 @@ class WorldMap(QWidget):
         self._pulse = 0.0
         self._lon0, self._lat0 = 0.0, 20.0
         self._span = 75.0  # degrees of longitude either side of the centre
+        self._caption = ""
 
     def set_pass(self, station: tuple[float, float], name: str, track: GroundTrack | None) -> None:
         self._station, self._station_name, self._track = station, name, track
@@ -106,9 +108,30 @@ class WorldMap(QWidget):
         self._lat0 = float(np.clip(station[0], -50, 50))
         self.update()
 
-    def set_time(self, seconds: float, pulse: float) -> None:
-        self._t, self._pulse = seconds, pulse
+    def set_time(self, seconds: float, pulse: float, caption: str = "") -> None:
+        self._t, self._pulse, self._caption = seconds, pulse, caption
         self.update()
+
+    def _subtitle(self, painter: QPainter) -> None:
+        """The narration, like film subtitles: centred near the bottom, on a dark band."""
+        if not self._caption:
+            return
+        font = QFont(theme.SANS)
+        font.setPixelSize(16)
+        font.setWeight(QFont.Medium)
+        painter.setFont(font)
+        width = min(self.width() - 60, 760)
+        box = QRectF((self.width() - width) / 2, 0, width, 1000)
+        needed = painter.boundingRect(box.adjusted(16, 10, -16, -10), Qt.TextWordWrap | Qt.AlignHCenter,
+                                      self._caption)
+        height = needed.height() + 22
+        box = QRectF((self.width() - width) / 2, self.height() - height - 30, width, height)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(6, 10, 16, 215))
+        painter.drawRoundedRect(box, 8, 8)
+        painter.setPen(QColor(INK))
+        painter.drawText(box.adjusted(16, 10, -16, -10), Qt.TextWordWrap | Qt.AlignHCenter | Qt.AlignVCenter,
+                         self._caption)
 
     # -- projection: equirectangular around the station, longitudes wrapped
     def _scale(self) -> float:
@@ -134,6 +157,7 @@ class WorldMap(QWidget):
             self._pass(painter)
         if self._station is not None:
             self._pin(painter)
+        self._subtitle(painter)
         painter.setPen(QColor(theme.FAINT))
         font = QFont(theme.SANS)
         font.setPixelSize(10)
@@ -292,6 +316,8 @@ class ReplayScreen(QWidget):
         self._t = 0.0
         self._t0, self._t1 = 0.0, 1.0
         self._workers: list = []
+        self._narrator: PassNarrator | None = None
+        self._places: Places | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(28, 20, 28, 20)
@@ -407,6 +433,7 @@ class ReplayScreen(QWidget):
         axes = self._session.cache.axes(obs, download=False)
         self._draw_recording(axes)
         self._track = None
+        self._narrator = None
         self.map.set_pass(self._station_or_default(obs), obs.station_name, None)
         try:
             site = self._explainer.stations.site(obs) if self._explainer else None
@@ -415,6 +442,8 @@ class ReplayScreen(QWidget):
                 seconds = np.linspace(-margin, (obs.duration_s or 600) + margin, 400)
                 self._track = ground_track(obs.tle, site, obs.start, seconds)
                 self.map.set_pass((site.lat, site.lng), obs.station_name, self._track)
+                self._places = self._places or Places()
+                self._narrator = PassNarrator(self._track, satellite, self._places, activity=self._activity)
         except (OrbitError, OSError, ValueError):
             pass
         self._show_story(None)
@@ -460,6 +489,18 @@ class ReplayScreen(QWidget):
         half = max((n_freq - 2 * edge) // 20, 2)
         band = power[:, centre - half:centre + half].max(axis=1)
         self._band = np.clip((band - 2.0) / 4.0, 0.0, 1.0)
+        # Strong anywhere in the band (not only the centre): a stray satellite or
+        # interference crosses the centre only briefly.
+        anywhere = power[:, edge:n_freq - edge].max(axis=1)
+        self._anywhere = np.clip((anywhere - 3.0) / 3.0, 0.0, 1.0)
+
+    def _activity(self, seconds: float) -> float:
+        """How strong the signal at the centre is at this moment of the recording (0..1)."""
+        if self._band is None:
+            return 0.0
+        fraction = (seconds - self._t0) / max(self._t1 - self._t0, 1e-6)
+        row = int(np.clip(fraction, 0, 0.999) * len(self._band))
+        return float(max(self._band[row], self._anywhere[row]))
 
     def _explained(self, obs_id: int, explanation: TrackExplanation) -> None:
         if self._item is None or obs_id != self._item.obs.id:
@@ -467,6 +508,8 @@ class ReplayScreen(QWidget):
         self._explanation = explanation
         axes = explanation.prediction.axes
         self._draw_recording(axes)
+        if self._narrator is not None:
+            self._narrator.set_explanation(explanation)
         self._show_story(explanation, final=True)
 
     def _show_story(self, explanation: TrackExplanation | None, final: bool = False) -> None:
@@ -524,6 +567,13 @@ class ReplayScreen(QWidget):
             self._timer.start()
             self.play.setText("❚❚  Pause")
 
+    def seek(self, fraction: float) -> None:
+        """Pause at a point of the pass (0 = start of the recording, 1 = end)."""
+        self._t = self._t0 + (self._t1 - self._t0) * float(np.clip(fraction, 0, 1))
+        self._timer.stop()
+        self.play.setText("▶  Play")
+        self._update_frame()
+
     def finish(self) -> None:
         """Jump to the end (tests, screenshots)."""
         self._t = self._t1
@@ -565,7 +615,8 @@ class ReplayScreen(QWidget):
         else:
             self.predicted.setData([], [])
         pulse = float(self._band[min(rows, n_time - 1)]) if self._band is not None and rows else 0.0
-        self.map.set_time(self._t, pulse)
+        subtitle = self._narrator.line(self._t) if self._narrator is not None else ""
+        self.map.set_time(self._t, pulse, subtitle)
         self.timeline.blockSignals(True)
         self.timeline.setValue(int(np.clip(fraction, 0, 1) * 1000))
         self.timeline.blockSignals(False)
