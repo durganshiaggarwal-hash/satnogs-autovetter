@@ -1,0 +1,71 @@
+{
+  "setup": {
+    "n": 387,
+    "epochs": 30,
+    "seed": 0,
+    "test_stations": 14,
+    "test_signal_share": 0.6666666666666666
+  },
+  "held_out_stations": {
+    "features": {
+      "n": 78,
+      "accuracy": 0.782051282051282,
+      "signal_precision": 0.972972972972973,
+      "signal_recall": 0.6923076923076923,
+      "no_signal_precision": 0.6097560975609756,
+      "no_signal_recall": 0.9615384615384616,
+      "balanced_accuracy": 0.8269230769230769,
+      "auroc": 0.8136094674556213,
+      "train_seconds": 2.2
+    },
+    "cnn": {
+      "n": 78,
+      "accuracy": 0.7307692307692307,
+      "signal_precision": 0.9428571428571428,
+      "signal_recall": 0.6346153846153846,
+      "no_signal_precision": 0.5581395348837209,
+      "no_signal_recall": 0.9230769230769231,
+      "balanced_accuracy": 0.7788461538461539,
+      "auroc": 0.7544378698224852,
+      "train_seconds": 9.0
+    }
+  },
+  "random_split": {
+    "features": {
+      "n": 78,
+      "accuracy": 0.8333333333333334,
+      "signal_precision": 0.9069767441860465,
+      "signal_recall": 0.8125,
+      "no_signal_precision": 0.7428571428571429,
+      "no_signal_recall": 0.8666666666666667,
+      "balanced_accuracy": 0.8395833333333333,
+      "auroc": 0.9215277777777778,
+      "train_seconds": 1.0
+    },
+    "cnn": {
+      "n": 78,
+      "accuracy": 0.38461538461538464,
+      "signal_precision": NaN,
+      "signal_recall": 0.0,
+      "no_signal_precision": 0.38461538461538464,
+      "no_signal_recall": 1.0,
+      "balanced_accuracy": 0.5,
+      "auroc": 0.6715277777777777,
+      "train_seconds": 0.7
+    }
+  },
+  "feature_importances": {
+    "track_steadiness": 0.13433685462834247,
+    "centre_lit_rows": 0.11163316294708107,
+    "centre_p99": 0.10832209109560224,
+    "row_noise_variation": 0.10303184691822949,
+    "peak_offset": 0.10281759336009517,
+    "centre_burstiness": 0.0975094756170376,
+    "centre_excess": 0.08649675552726982,
+    "any_lit_rows": 0.06430770761910881,
+    "peak_prominence": 0.05829298798570344,
+    "band_p995": 0.04925858816875429,
+    "track_wander": 0.0485885905297685,
+    "peak_width": 0.035404345603007106
+  }
+}

@@ -30,10 +30,11 @@ from .source import (
 )
 from .waterfall import WaterfallDecodeError, WaterfallImage
 from .dataset import NO_SIGNAL, SIGNAL, StationSplit, TimeSplit, VettingSet, VettingSplit, normalise
-from .model import WaterfallVetter
+from .features import FEATURES, feature_matrix, waterfall_features
+from .model import FeatureVetter, Vetter, WaterfallVetter
 
 __all__ = [
-    "WaterfallVetter",
+    "FEATURES", "FeatureVetter", "Vetter", "WaterfallVetter", "feature_matrix", "waterfall_features",
     "NO_SIGNAL", "SIGNAL", "StationSplit", "TimeSplit", "VettingSet", "VettingSplit", "normalise",
     "ArtifactCache", "ArtifactError", "Manifest", "ManifestSource", "Observation", "ObservationQuery",
     "ObservationSource", "Response", "SatnogsApiSource", "SatnogsError", "Transport", "UrllibTransport",

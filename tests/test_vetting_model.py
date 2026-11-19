@@ -131,3 +131,78 @@ class TestWaterfallVetter:
             model.fit(inputs[:, 0], labels)
         with pytest.raises(ValidationError):
             model.fit(inputs, labels + 1)
+
+
+# ----------------------------------------------------------------------
+from satrecovery.vetting import FEATURES, FeatureVetter, Vetter, feature_matrix, waterfall_features  # noqa: E402
+
+
+def moving_track(rng: np.random.Generator, size: int = 64) -> np.ndarray:
+    """Another satellite's S-curve sweeping across the band -- "without signal"."""
+    power = rng.normal(0.4, 0.05, (size, size))
+    for row in range(size):
+        col = int(size / 2 + 0.35 * size * np.tanh((row - size / 2) / (size / 6)))
+        power[row, max(col - 1, 0):col + 1] += 0.5
+    return np.clip(power, 0, 1).astype(np.float32)
+
+
+class TestFeatures:
+    def test_one_value_per_named_feature(self):
+        rng = np.random.default_rng(0)
+        values = waterfall_features(normalise(synthetic(True, rng)))
+        assert values.shape == (len(FEATURES),) and np.all(np.isfinite(values))
+
+    def test_bursts_at_the_centre_light_the_centre_band(self):
+        rng = np.random.default_rng(1)
+        names = list(FEATURES)
+        signal = waterfall_features(normalise(synthetic(True, rng)))
+        noise = waterfall_features(normalise(synthetic(False, rng)))
+        lit = names.index("centre_lit_rows")
+        assert signal[lit] > noise[lit]
+        assert signal[names.index("centre_excess")] > noise[names.index("centre_excess")]
+
+    def test_a_moving_track_wanders_and_a_centred_one_does_not(self):
+        rng = np.random.default_rng(2)
+        names = list(FEATURES)
+        moving = waterfall_features(normalise(moving_track(rng)))
+        steady = waterfall_features(normalise(synthetic(True, rng)))
+        assert moving[names.index("track_wander")] > steady[names.index("track_wander")]
+        assert moving[names.index("track_steadiness")] < steady[names.index("track_steadiness")]
+
+    def test_flat_and_tiny_inputs(self):
+        assert np.all(np.isfinite(waterfall_features(np.zeros((32, 32)))))
+        with pytest.raises(ValidationError):
+            waterfall_features(np.zeros((8, 8)))
+        assert feature_matrix(np.zeros((3, 1, 32, 32))).shape == (3, len(FEATURES))
+
+
+class TestFeatureVetter:
+    def test_is_a_vetter_and_refuses_untrained(self):
+        model = FeatureVetter()
+        assert isinstance(model, Vetter)
+        with pytest.raises(ModelNotTrainedError):
+            model.predict_proba(np.zeros((1, 1, 32, 32)))
+
+    def test_learns_and_explains_and_round_trips(self, toy, tmp_path):
+        inputs, labels = toy
+        model = FeatureVetter(n_trees=50, seed=0)
+        model.fit(inputs[:200], labels[:200])
+        probability = model.predict_proba(inputs[200:])
+        assert np.mean(model.decide(inputs[200:]) == labels[200:]) > 0.9
+        assert set(model.importances()) == set(FEATURES)
+        assert abs(sum(model.importances().values()) - 1.0) < 1e-6
+        again = FeatureVetter.from_file(model.save(tmp_path / "f.pt"))
+        assert np.allclose(again.predict_proba(inputs[200:]), probability)
+
+    def test_needs_both_labels(self, toy):
+        inputs, labels = toy
+        with pytest.raises(ValidationError):
+            FeatureVetter().fit(inputs[labels == 1], labels[labels == 1])
+
+    def test_a_cnn_and_a_forest_answer_the_same_way(self, toy):
+        inputs, labels = toy
+        vetters: list[Vetter] = [FeatureVetter(n_trees=20), WaterfallVetter(channels=(8,), size=32, device=pick_device(False))]
+        for vetter in vetters:
+            vetter.fit(inputs[:100], labels[:100], **({"epochs": 1, "verbose": False} if isinstance(vetter, WaterfallVetter) else {}))
+            assert vetter.predict_proba(inputs[:5]).shape == (5,)
+            assert set(vetter.decide(inputs[:5]).tolist()) <= {0, 1}

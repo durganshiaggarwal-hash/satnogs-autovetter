@@ -1,21 +1,30 @@
-"""The baseline auto-vetter: a small 2-D ResNet that looks at the waterfall.
+"""The baseline auto-vetters: a CNN on the picture, and a forest on measurements.
 
-This is the *baseline* on purpose: it sees only the picture, as earlier
-public work does, so later steps (audio features, the orbit check,
-calibrated abstention) can be measured against it.
+These are *baselines* on purpose: they see only the waterfall, as earlier
+public work does, so later steps (audio, the orbit check, calibrated
+abstention) can be measured against them.
 
-DESIGN NOTE: INHERITANCE
-------------------------
-:class:`WaterfallVetter` is a :class:`~satrecovery.learning.TrainableModel`,
-like the Phase 4 demappers and the RML24 classifier: it inherits the
-"refuse to answer until trained" guard and the JSON sidecar, and trains
-with the Phase 4 :class:`~satrecovery.learning.trainer.Trainer`
-unchanged -- the same loop now fits pictures instead of symbols.
+DESIGN NOTE: INHERITANCE + POLYMORPHISM
+---------------------------------------
+:class:`Vetter` is the interface: "given waterfalls, say how likely each
+holds the satellite's signal".  It is itself a
+:class:`~satrecovery.learning.TrainableModel`, so every vetter inherits
+the "refuse to answer until trained" guard and the JSON sidecar.
+
+* :class:`WaterfallVetter` -- a small 2-D ResNet, trained with the
+  Phase 4 :class:`~satrecovery.learning.trainer.Trainer` unchanged.
+* :class:`FeatureVetter` -- 300 decision trees voting on the twelve
+  measurements in :mod:`~satrecovery.vetting.features`; it can say *why*.
+
+The training script, the evaluation and (later) the app take any
+``Vetter`` and never ask which kind.
 """
 
 from __future__ import annotations
 
+import pickle
 import time
+from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +33,28 @@ import numpy as np
 from ..core.exceptions import ValidationError
 from ..learning.base import TrainableModel, TrainingHistory
 from ..learning.trainer import EarlyStopping, ProgressPrinter, Trainer
+from .features import FEATURES, feature_matrix
+
+
+class Vetter(TrainableModel):
+    """Anything that scores waterfalls ``(n, 1, time, freq)`` for "signal present"."""
+
+    @abstractmethod
+    def predict_proba(self, inputs: np.ndarray) -> np.ndarray:
+        """P(signal) for each waterfall, shape ``(n,)``."""
+
+    def decide(self, inputs: np.ndarray, threshold: float = 0.5) -> np.ndarray:
+        """1 (signal) or 0 (no signal) for each waterfall."""
+        return (self.predict_proba(inputs) >= threshold).astype(np.int64)
+
+    @staticmethod
+    def _check_binary(inputs: np.ndarray, targets: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        inputs, targets = TrainableModel._check_pair(inputs, targets)
+        if inputs.ndim != 4 or inputs.shape[1] != 1:
+            raise ValidationError("inputs", inputs.shape, "expected (n, 1, time, frequency)")
+        if not set(np.unique(targets).tolist()) <= {0, 1}:
+            raise ValidationError("targets", np.unique(targets)[:5], "labels must be 0 or 1")
+        return inputs, np.asarray(targets, dtype=np.int64)
 
 
 def pick_device(prefer_gpu: bool = True) -> Any:
@@ -103,7 +134,7 @@ def _build_network(channels: tuple[int, ...], size: int):
     return Network()
 
 
-class WaterfallVetter(TrainableModel):
+class WaterfallVetter(Vetter):
     """P(the satellite's signal is in this waterfall)."""
 
     def __init__(self, channels: tuple[int, ...] = (16, 32, 64, 96), size: int = 128,
@@ -138,11 +169,7 @@ class WaterfallVetter(TrainableModel):
         import torch
         import torch.nn as nn
 
-        inputs, targets = self._check_pair(inputs, targets)
-        if inputs.ndim != 4 or inputs.shape[1] != 1:
-            raise ValidationError("inputs", inputs.shape, "expected (n, 1, time, frequency)")
-        if not set(np.unique(targets)) <= {0, 1}:
-            raise ValidationError("targets", np.unique(targets)[:5], "labels must be 0 or 1")
+        inputs, targets = self._check_binary(inputs, targets)
 
         # Balance the two labels in the loss, whatever the mix of the data.
         share = float(np.mean(targets))
@@ -218,3 +245,83 @@ class WaterfallVetter(TrainableModel):
     def describe(self) -> str:
         state = "trained" if self.is_trained else "untrained"
         return f"{self.name} (2-D ResNet, {self.n_parameters:,} weights, {state})"
+
+
+class FeatureVetter(Vetter):
+    """300 decision trees voting on the twelve waterfall measurements.
+
+    Small data suits it (it scored AUROC 0.83 on held-out stations from
+    315 observations, where the CNN could not learn), and it can explain
+    itself: :meth:`importances` says which measurements it relies on.
+    The measurements are computed inside, so it takes the same input as
+    every other :class:`Vetter`.
+
+    Saved with ``pickle``: only load files this project wrote.
+    """
+
+    def __init__(self, n_trees: int = 300, min_leaf: int = 3, seed: int = 0, name: str = "FeatureVetter") -> None:
+        super().__init__(name)
+        if n_trees < 1 or min_leaf < 1:
+            raise ValidationError("n_trees/min_leaf", (n_trees, min_leaf), "must be positive")
+        self._n_trees, self._min_leaf, self._seed = int(n_trees), int(min_leaf), int(seed)
+        self._forest: Any = None
+        self._meta: dict[str, Any] = {}
+
+    def fit(self, inputs: np.ndarray, targets: np.ndarray, **_: Any) -> TrainingHistory:
+        from sklearn.ensemble import RandomForestClassifier
+
+        inputs, targets = self._check_binary(inputs, targets)
+        if len(np.unique(targets)) < 2:
+            raise ValidationError("targets", np.unique(targets), "need examples of both labels")
+        started = time.time()
+        self._forest = RandomForestClassifier(
+            n_estimators=self._n_trees, min_samples_leaf=self._min_leaf, class_weight="balanced",
+            random_state=self._seed, n_jobs=-1).fit(feature_matrix(inputs), targets)
+        self._history = TrainingHistory(self.name)
+        self._history.record(1, train_accuracy=float(self._forest.score(feature_matrix(inputs), targets)))
+        self._meta.update(trained_at=time.time(), train_seconds=time.time() - started, n_train=int(len(inputs)))
+        self._mark_trained()
+        return self._history
+
+    def predict_proba(self, inputs: np.ndarray) -> np.ndarray:
+        self._require_trained()
+        inputs = np.asarray(inputs, dtype=np.float32)
+        if inputs.ndim == 2:
+            inputs = inputs[None, None]
+        features = feature_matrix(inputs)
+        column = list(self._forest.classes_).index(1)
+        return self._forest.predict_proba(features)[:, column].astype(np.float32)
+
+    def importances(self) -> dict[str, float]:
+        """Each measurement's share of the forest's decisions, largest first."""
+        self._require_trained()
+        pairs = zip(FEATURES, self._forest.feature_importances_.tolist())
+        return dict(sorted(pairs, key=lambda kv: -kv[1]))
+
+    def save(self, path: str | Path) -> Path:
+        self._require_trained()
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(pickle.dumps(self._forest))
+        self._write_sidecar(path, {"model": type(self).__name__, "features": list(FEATURES),
+                                   "n_trees": self._n_trees, "min_leaf": self._min_leaf, **self._meta,
+                                   "importances": self.importances()})
+        return path
+
+    def load(self, path: str | Path) -> "FeatureVetter":
+        path = Path(path)
+        meta = self._read_sidecar(path)
+        if meta.get("features") and meta["features"] != list(FEATURES):
+            raise ValidationError("features", meta["features"], "saved with different measurements")
+        self._forest = pickle.loads(path.read_bytes())  # noqa: S301 - own files only
+        self._meta = {k: v for k, v in meta.items() if k not in ("features", "importances")}
+        self._mark_trained()
+        return self
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "FeatureVetter":
+        return cls().load(path)
+
+    def describe(self) -> str:
+        state = "trained" if self.is_trained else "untrained"
+        return f"{self.name} ({self._n_trees} trees on {len(FEATURES)} measurements, {state})"
