@@ -822,29 +822,72 @@ class IntroScreen(QWidget):
         outer.addLayout(row)
 
 
-class RecordingCard(QPushButton):
-    """One recording on the home screen: the model's mark, the satellite, the station, how long ago."""
+def waterfall_thumbnail(power: np.ndarray, width: int = 64, height: int = 72):
+    """A small picture of a recording (inferno colours), for cards."""
+    from PySide6.QtGui import QImage, QPixmap
 
-    def __init__(self, item: Item, title: str | None = None, parent=None) -> None:
+    lut = (pg.colormap.get("inferno").getLookupTable(nPts=256, alpha=False)).astype(np.uint8)
+    small = power[::-1]                                       # start of the pass at the bottom, as on screen
+    rows = np.linspace(0, small.shape[0] - 1, height).astype(int)
+    cols = np.linspace(0, small.shape[1] - 1, width).astype(int)
+    level = np.clip((small[np.ix_(rows, cols)] + 2.0) / 8.0, 0, 1)
+    rgb = np.ascontiguousarray(lut[(level * 255).astype(np.uint8)])
+    image = QImage(rgb.data, width, height, 3 * width, QImage.Format_RGB888).copy()
+    return QPixmap.fromImage(image)
+
+
+class RecordingCard(QPushButton):
+    """One recording on the home screen: a thumbnail, the satellite, the verdict, the station, when."""
+
+    def __init__(self, item: Item, title: str | None = None, satellite: str = "", picture=None,
+                 parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("quiet")
+        self.setObjectName("recording")
         self.setMinimumHeight(96)
         self.setMinimumWidth(250)
+        self.setCursor(Qt.PointingHandCursor)
         obs = item.obs
         self.obs_id = obs.id
-        mark, colour = {Verdict.SIGNAL: ("✔ heard", theme.SIGNAL), Verdict.NO_SIGNAL: ("✖ nothing heard", theme.NO_SIGNAL)
-                        }.get(item.verdict, ("? unsure", theme.UNSURE))
+        mark, colour = {Verdict.SIGNAL: ("✔  heard", theme.SIGNAL), Verdict.NO_SIGNAL: ("✖  nothing heard", theme.NO_SIGNAL)
+                        }.get(item.verdict, ("?  unsure", theme.UNSURE))
         ago = ""
         if obs.end is not None:
             from datetime import datetime, timezone
 
             minutes = (datetime.now(timezone.utc) - obs.end).total_seconds() / 60
             ago = f"{minutes:.0f} min ago" if minutes < 120 else f"{minutes / 60:.0f} h ago"
-        first = title or f"{mark}"
-        self.setText(f"{first}\nNORAD {obs.norad_cat_id} · {obs.transmitter_mode or '?'}\n"
-                     f"{(obs.station_name or '')[:26]}  {ago}")
-        self.setStyleSheet(f"text-align: left; padding: 12px 14px; font-size: 12px; color: {SOFT};"
-                           f"border-left: 3px solid {colour};")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 10, 12, 10)
+        row.setSpacing(12)
+        if picture is not None:
+            thumb = QLabel()
+            thumb.setPixmap(picture)
+            thumb.setFixedSize(picture.size())
+            thumb.setAttribute(Qt.WA_TransparentForMouseEvents)
+            row.addWidget(thumb)
+        words = QVBoxLayout()
+        words.setSpacing(2)
+        top = QHBoxLayout()
+        verdict = QLabel(title or mark)
+        verdict.setStyleSheet(f"color: {colour}; font-weight: 600; font-size: 12px;")
+        top.addWidget(verdict, 1)
+        when = QLabel(ago)
+        when.setStyleSheet(f"color: {theme.FAINT}; font-size: 11px;")
+        top.addWidget(when)
+        words.addLayout(top)
+        name = QLabel(satellite or f"NORAD {obs.norad_cat_id}")
+        name.setStyleSheet(f"color: {INK}; font-size: 14px; font-weight: 700;")
+        words.addWidget(name)
+        detail = QLabel(f"{obs.transmitter_mode or '?'}  ·  {(obs.station_name or 'unknown station')[:28]}")
+        detail.setStyleSheet(f"color: {SOFT}; font-size: 11px;")
+        words.addWidget(detail)
+        words.addStretch(1)
+        for label_ in (verdict, when, name, detail):
+            label_.setAttribute(Qt.WA_TransparentForMouseEvents)
+        row.addLayout(words, 1)
+        self.setStyleSheet(f"QPushButton#recording {{ background: {theme.PANEL}; border: 1px solid {theme.RULE}; "
+                           f"border-left: 3px solid {colour}; border-radius: 8px; text-align: left; }}"
+                           f"QPushButton#recording:hover {{ border-color: {theme.DIM}; border-left-color: {colour}; }}")
 
 
 class HomeScreen(QWidget):
@@ -856,10 +899,12 @@ class HomeScreen(QWidget):
 
     SHOWN = 8
 
-    def __init__(self, session: VettingSession, showcase: tuple = (), parent=None) -> None:
+    def __init__(self, session: VettingSession, showcase: tuple = (), parent=None, names=None) -> None:
         super().__init__(parent)
         self._session = session
         self._showcase = tuple(showcase)
+        self._names = names or (lambda obs: f"NORAD {obs.norad_cat_id}")
+        self._thumbs: dict[int, object] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(60, 36, 60, 32)
         outer.setSpacing(10)
@@ -935,12 +980,26 @@ class HomeScreen(QWidget):
         for (value, text), (v, t) in zip(self._stat_labels, numbers):
             value.setText(v)
             text.setText(t)
-        self._fill(self._latest, [RecordingCard(i) for i in latest[:self.SHOWN]], columns=4,
+        self._fill(self._latest, [self._card(i) for i in latest[:self.SHOWN]], columns=4,
                    empty="Recordings appear here as they download.")
         titles = {15489000: "Not a satellite at all", 15490378: "The wrong satellite"}
-        examples = [RecordingCard(session.item(o.id), titles.get(o.id)) for o in self._showcase
+        examples = [self._card(session.item(o.id), titles.get(o.id)) for o in self._showcase
                     if o.id in {i.obs.id for i in session.all_items}]
+        for card in examples:
+            card.setMinimumWidth(320)
         self._fill(self._examples, examples, empty="")
+
+    def _card(self, item: Item, title: str | None = None) -> RecordingCard:
+        if item.obs.id not in self._thumbs:
+            try:
+                self._thumbs[item.obs.id] = waterfall_thumbnail(self._session.waterfall(item.obs.id))
+            except Exception:  # noqa: BLE001 - a missing picture must not break the home screen
+                self._thumbs[item.obs.id] = None
+        try:
+            name = self._names(item.obs)
+        except Exception:  # noqa: BLE001
+            name = f"NORAD {item.obs.norad_cat_id}"
+        return RecordingCard(item, title, name, self._thumbs[item.obs.id])
 
     def _fill(self, layout, cards, columns: int = 0, empty: str = "") -> None:
         while layout.count():
@@ -1017,7 +1076,8 @@ class MissionWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.launcher = LauncherScreen()
         self.intro = IntroScreen()
-        self.home = HomeScreen(session, showcase)
+        names = (lambda obs: explainer.catalog.name(int(obs.norad_cat_id or 0))) if explainer is not None else None
+        self.home = HomeScreen(session, showcase, names=names)
         self.replay = ReplayScreen(session, explainer)
         for screen in (self.launcher, self.intro, self.home, self.replay):
             self.stack.addWidget(screen)
@@ -1059,7 +1119,8 @@ class MissionWindow(QMainWindow):
 
         root = Path(__file__).resolve().parents[3]
         if self._lab_process is None or self._lab_process.poll() is not None:
-            self._lab_process = subprocess.Popen([sys.executable, "-m", "satrecovery.analysis"], cwd=str(root))
+            self._lab_process = subprocess.Popen([sys.executable, "-m", "satrecovery.analysis", "--dark"],
+                                                 cwd=str(root))
 
     def fetch_newest(self) -> None:
         if self._feed is not None:

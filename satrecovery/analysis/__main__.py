@@ -40,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="where the trained models and the history live (shared with the original app)")
     parser.add_argument("--classifier", default=None,
                         help="the trained classifier (default: <data-dir>/models/classifier.pt)")
+    parser.add_argument("--dark", action="store_true",
+                        help="open in the dark look (the launcher does this, to match Live satellites)")
     args = parser.parse_args(argv)
 
     from PySide6.QtWidgets import QApplication
@@ -64,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         theme.configure_plots()
         app.setStyleSheet(theme.stylesheet())
 
-    apply_theme(preferences.dark_mode)
+    apply_theme(args.dark or preferences.dark_mode)
     server = AnalysisServer(data_dir=args.data_dir, rml24_path=rml24, classifier_path=args.classifier).start()
     client = AnalysisClient(server.url)
     windows: list[AnalysisWindow] = []

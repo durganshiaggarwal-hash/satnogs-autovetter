@@ -53,6 +53,10 @@ QPushButton#nosignal {{ border-color: {NO_SIGNAL}; color: {NO_SIGNAL}; }}
 QPushButton#primary {{ border-color: {ACCENT}; color: {ACCENT}; }}
 QComboBox, QDoubleSpinBox {{ background: {RAISED}; border: 1px solid {RULE}; border-radius: 3px; padding: 3px 6px;
                              font-family: "{MONO}"; font-size: 11px; }}
+QToolButton#thresholds {{ background: {RAISED}; border: 1px solid {RULE}; border-radius: 3px; padding: 6px 10px;
+                          font-family: "{MONO}"; font-size: 11px; color: {TEXT}; }}
+QToolButton#thresholds::menu-indicator {{ image: none; }}
+QMenu {{ background: {RAISED}; border: 1px solid {RULE}; }}
 QComboBox QAbstractItemView {{ background: {RAISED}; selection-background-color: {RULE}; }}
 QCheckBox {{ color: {DIM}; font-size: 11px; }}
 QStatusBar {{ background: {PANEL}; color: {DIM}; font-family: "{MONO}"; font-size: 10px; border-top: 1px solid {RULE}; }}

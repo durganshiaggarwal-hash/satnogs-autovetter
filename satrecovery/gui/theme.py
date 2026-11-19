@@ -133,11 +133,15 @@ _LIGHT_VALUES: dict[str, object] = {}
 #: so every pairing used in the light look (light text on soft fills
 #: becomes light text on deep fills) stays readable.
 _DARK_VALUES: dict[str, object] = {
-    "PEACH": "#8f5a4c", "BLUSH": "#8a5652", "SAND": "#7a5c50", "MAUVE": "#c9b6cc", "SAGE": "#5b6e55",
-    "BG": "#1d1a1f", "SURFACE": "#28232a", "SUNK": "#332d35", "LINE": "#433b45", "LINE_SOFT": "#362f38",
-    "INK": "#f1e9ee", "INK_2": "#c4b6c1", "INK_3": "#8f828d", "FOCUS": "#c9b6cc",
-    "BRAND_DEEP": "#c9b6cc", "BRAND_SOFT": ("#3a3036", "#3b3034", "#382f31"),
-    "CRITICAL": "#ff7b72", "GOOD": "#7fcf8a", "RAW": "#a99ba8",
+    # Retuned (November 2026) to match the Live satellites half of the app,
+    # so the two halves read as one product: near-black surfaces, one teal
+    # accent, the same green and coral.  Hue roles are unchanged: the
+    # "brand" fills are deep teal, the one strong colour is bright teal.
+    "PEACH": "#1d4f59", "BLUSH": "#22616d", "SAND": "#1b4a54", "MAUVE": "#56c8d8", "SAGE": "#2f5a44",
+    "BG": "#0d1015", "SURFACE": "#12161c", "SUNK": "#181d25", "LINE": "#232a34", "LINE_SOFT": "#1a2029",
+    "INK": "#e9eef4", "INK_2": "#9aa5b4", "INK_3": "#6b7584", "FOCUS": "#56c8d8",
+    "BRAND_DEEP": "#56c8d8", "BRAND_SOFT": ("#13262c", "#14292f", "#122328"),
+    "CRITICAL": "#f07a5f", "GOOD": "#5fd68e", "RAW": "#8792a2",
 }
 
 

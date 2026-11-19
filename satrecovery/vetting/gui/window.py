@@ -77,12 +77,6 @@ class VettingWindow(QMainWindow):
         outer.setSpacing(0)
         outer.addWidget(self._top_bar())
         outer.addWidget(rule())
-        self.banner = QLabel()
-        self.banner.setObjectName("mono")
-        self.banner.setContentsMargins(16, 6, 16, 6)
-        self.banner.setTextFormat(Qt.RichText)
-        outer.addWidget(self.banner)
-        outer.addWidget(rule())
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
@@ -95,13 +89,17 @@ class VettingWindow(QMainWindow):
         middle.addWidget(self.orbit)
         middle.setSizes([600, 240])
         splitter.addWidget(middle)
-        splitter.addWidget(self._detail_panel())
-        splitter.setSizes([440, 680, 320])
+        detail = self._detail_panel()
+        detail.setMaximumWidth(360)
+        splitter.addWidget(detail)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([420, 680, 340])
         outer.addWidget(splitter, 1)
         self.setCentralWidget(root)
         self.statusBar().showMessage(
-            "G signal   B no signal   A accept suggestion   J/K next/previous   N next unsure   "
-            "T track   O orbit curves   V volunteer's answer   hover the waterfall to move the sky chart")
+            "G signal · B no signal · A accept · J/K move · N next unsure · T track · O curves · V answer")
 
         self._keys()
         self._update_mode()
@@ -123,14 +121,18 @@ class VettingWindow(QMainWindow):
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(16, 10, 16, 10)
         titles = QVBoxLayout()
+        titles.setSpacing(2)
         title = QLabel("SATNOGS · VETTING STATION")
         title.setObjectName("title")
-        sub = QLabel(self._session.model_name)
-        sub.setObjectName("sub")
+        title.setToolTip(self._session.model_name)
+        # What this queue is (live / unvetted / test set), in one short line.
+        self.banner = QLabel()
+        self.banner.setObjectName("sub")
+        self.banner.setTextFormat(Qt.RichText)
         titles.addWidget(title)
-        titles.addWidget(sub)
+        titles.addWidget(self.banner)
         layout.addLayout(titles)
-        layout.addSpacing(24)
+        layout.addSpacing(18)
 
         # Which queue: the real work, or the test set that measures the model.
         self.mode_buttons = {}
@@ -143,16 +145,27 @@ class VettingWindow(QMainWindow):
         layout.addStretch(1)
 
         self.c_auto_share = Counter("automatable", theme.ACCENT)
-        self.c_error = Counter("error when sure (test set)")
+        self.c_error = Counter("error if sure")
+        self.c_error.setToolTip("Share of confident answers that were wrong, measured on recordings volunteers "
+                                "had checked, each scored with its station held out.")
         self.c_check = Counter("to check", theme.UNSURE)
-        self.c_auto = Counter("auto-vetted")
-        self.c_you = Counter("by you")
+        self.c_auto = Counter("auto")
+        self.c_you = Counter("you")
         for counter in (self.c_auto_share, self.c_error, self.c_check, self.c_auto, self.c_you):
             layout.addWidget(counter)
 
-        layout.addSpacing(12)
-        policy = QGridLayout()
-        policy.setVerticalSpacing(2)
+        layout.addSpacing(8)
+        # The two thresholds live in a small pop-up, not across the bar.
+        from PySide6.QtWidgets import QMenu, QToolButton, QWidgetAction
+
+        self.thresholds = QToolButton()
+        self.thresholds.setPopupMode(QToolButton.InstantPopup)
+        self.thresholds.setObjectName("thresholds")
+        menu = QMenu(self.thresholds)
+        holder = QWidget()
+        policy = QGridLayout(holder)
+        policy.setContentsMargins(12, 10, 12, 10)
+        policy.setVerticalSpacing(4)
         self.low = QDoubleSpinBox()
         self.high = QDoubleSpinBox()
         for box, value in ((self.low, self._session.policy.low), (self.high, self._session.policy.high)):
@@ -165,8 +178,12 @@ class VettingWindow(QMainWindow):
         policy.addWidget(caps("signal above"), 0, 1)
         policy.addWidget(self.low, 1, 0)
         policy.addWidget(self.high, 1, 1)
-        layout.addLayout(policy)
-        layout.addSpacing(12)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(holder)
+        menu.addAction(action)
+        self.thresholds.setMenu(menu)
+        layout.addWidget(self.thresholds)
+        layout.addSpacing(8)
         self.auto_button = QPushButton("AUTO-VET CONFIDENT")
         self.auto_button.setObjectName("primary")
         self.auto_button.clicked.connect(self._auto_vet)
@@ -176,6 +193,7 @@ class VettingWindow(QMainWindow):
     def _queue_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
+        panel.setMinimumWidth(400)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(10, 10, 10, 10)
         row = QHBoxLayout()
@@ -346,18 +364,16 @@ class VettingWindow(QMainWindow):
             button.style().polish(button)
         if self._session.mode == "latest":
             self.banner.setText(
-                f"<span style='color:{theme.ACCENT}'>LIVE</span>&nbsp;&nbsp;The newest recordings from SatNOGS, "
-                f"most of them not checked by any volunteer yet.  Your decisions are saved on this computer only; "
-                f"nothing is sent to SatNOGS.")
+                f"<span style='color:{theme.ACCENT}'>LIVE</span> · newest SatNOGS recordings, mostly unchecked · "
+                f"decisions stay on this computer")
         elif self._session.mode == "unvetted":
             self.banner.setText(
-                f"<span style='color:{theme.ACCENT}'>REAL WORK</span>&nbsp;&nbsp;No volunteer has checked these on "
-                f"SatNOGS, so the verdicts here are new information.  Your decisions are saved on this computer only; "
-                f"nothing is sent to SatNOGS.")
+                f"<span style='color:{theme.ACCENT}'>REAL WORK</span> · no volunteer has checked these · "
+                f"decisions stay on this computer")
         else:
             self.banner.setText(
-                f"<span style='color:{theme.UNSURE}'>TEST SET</span>&nbsp;&nbsp;These already have a volunteer's answer "
-                f"on SatNOGS.  Each is scored by a model that never saw its station, to measure how often it is right.")
+                f"<span style='color:{theme.UNSURE}'>TEST SET</span> · volunteers' answers known · "
+                f"each scored with its station held out")
         self.reveal.setVisible(self._session.mode == "test")
 
     def _show_decision(self) -> None:
@@ -392,8 +408,10 @@ class VettingWindow(QMainWindow):
         self.c_check.value.setText(str(stats["to_check"]))
         self.c_auto.value.setText(str(stats["auto"]))
         self.c_you.value.setText(str(stats["yours"]))
+        self.thresholds.setText(f"⚙  {self._session.policy.low:.2f} · {self._session.policy.high:.2f}")
         remaining = stats["confident"] - stats["auto"]
-        self.auto_button.setText(f"AUTO-VET CONFIDENT ({max(remaining, 0)})")
+        self.auto_button.setText(f"AUTO-VET {max(remaining, 0)}")
+        self.auto_button.setToolTip("Record the model's answer for every confident recording not yet decided.")
 
     # ------------------------------------------------------------------
     def _decide(self, label: WaterfallLabel) -> None:

@@ -57,6 +57,26 @@ def _size(n: int | None, name: str) -> str:
 class ComparePage(Page):
     """Which kind of AI is best at naming the signal?"""
 
+    #: The left column is 300 px wide; a card's padding takes theme.PAD from each side.
+    LEFT_TEXT_WIDTH = 300 - 2 * theme.PAD
+
+    def _fit_labels(self) -> None:
+        """Give each wrapped label the height its text needs at the column's width.
+
+        Without this the column's layout squeezed them and the text was clipped
+        top and bottom (wrapped labels in a fixed-width column do not report
+        their height to it on their own).
+        """
+        for label in (self.chosen_name, self.chosen_about, self.in_use, self.fair):
+            label.ensurePolished()   # measure with the stylesheet's font, not the default one
+            label.setMinimumHeight(label.heightForWidth(self.LEFT_TEXT_WIDTH) + 2 if label.text() else 0)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        super().showEvent(event)
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(0, self._fit_labels)   # again once on screen, when styles are certainly applied
+
     COLUMNS = ["Model", "Overall", "+10 dB and above", "Size", "Training time", "Speed (one signal)", "In use"]
 
     def __init__(self, client, parent: QWidget | None = None) -> None:
@@ -82,16 +102,24 @@ class ComparePage(Page):
         self.in_use.setWordWrap(True)
         for widget in (self.chosen_name, self.chosen_about, self.use_button, self.in_use):
             chosen.addWidget(widget)
+        # Wrapped labels in a fixed-width column were squeezed below their text
+        # height and clipped; never let them shrink below what the text needs.
+        from PySide6.QtWidgets import QSizePolicy
+
+        for label in (self.chosen_name, self.chosen_about, self.in_use):
+            label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
         fair_card, fair = card("A fair test")
         self.fair = QLabel("Every model learns from the same recordings and is tested on the same "
                            "recordings it never saw. Only the model changes.")
         self.fair.setObjectName("Hint")
         self.fair.setWordWrap(True)
+        self.fair.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         fair.addWidget(self.fair)
         self.refresh_button = PillButton("Reload results", "secondary")
         self.refresh_button.clicked.connect(self.refresh)
         fair.addWidget(self.refresh_button)
+        self._fit_labels()
 
         left = QWidget()
         left.setFixedWidth(300)
@@ -215,6 +243,7 @@ class ComparePage(Page):
         self._fill_table(listing)
         active = next((m for m in listing["models"] if m["active"]), None)
         self.in_use.setText(f"The app is using: {active['label']}" if active else "")
+        self._fit_labels()
         # Keep the selection; else the model in use; else the top row (the best on clean signals).
         for keep in (self._selected, listing.get("active")):
             if keep is not None and self._row_of(keep) is not None:
@@ -337,6 +366,7 @@ class ComparePage(Page):
             return
         self.chosen_name.setText(model["label"])
         self.chosen_about.setText(model["about"])
+        self._fit_labels()
         self.use_button.setEnabled(bool(model["available"]) and not model["active"])
         self.use_button.setText("In use ✓" if model["active"] else "Use this model")
         r = model.get("results")
