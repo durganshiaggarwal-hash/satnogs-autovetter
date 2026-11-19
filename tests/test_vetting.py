@@ -375,3 +375,21 @@ class TestAxes:
         rgb[20:260, 30:170] = colormaps["viridis"](np.resize(known_spectrum, (240, 140)))[:, :, :3]
         with pytest.raises(AxisReadError):
             read_axes(rgb)
+
+
+def test_a_timeout_is_retried_then_succeeds():
+    class Flaky(Transport):
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, timeout=60.0):
+            self.calls += 1
+            if self.calls == 1:
+                raise SatnogsError("could not reach network.satnogs.org: The read operation timed out")
+            return page([api_row(1)])
+
+    clock = FakeClock()
+    transport = Flaky()
+    source = SatnogsApiSource(transport, min_interval=0.0, sleep=clock.sleep, clock=clock)
+    assert [o.id for o in source.fetch(ObservationQuery())] == [1]
+    assert transport.calls == 2 and clock.sleeps

@@ -158,7 +158,14 @@ class SatnogsApiSource(ObservationSource):
                     self._sleep(wait)
             self._last_request = self._clock()
             self.requests_made += 1
-            response = self._transport.get(url)
+            try:
+                response = self._transport.get(url)
+            except SatnogsError:
+                # A timeout or dropped connection: wait and try again, like a busy server.
+                if attempt == self._max_retries:
+                    raise
+                self._sleep(min(2.0 * 2 ** attempt, 120.0))
+                continue
             if response.status == 200:
                 return response
             if response.status == 429 or response.status >= 500:
