@@ -1,0 +1,18 @@
+{
+  "packet burst": {
+    "seconds": 0.4,
+    "carrier_hz": 11038.75,
+    "symbols": 3840,
+    "separation_db": 0.325898262248934,
+    "hdlc_flags": 12,
+    "flags_by_chance": 14.96875
+  },
+  "plain noise": {
+    "seconds": 0.4,
+    "carrier_hz": 11070.0,
+    "symbols": 3840,
+    "separation_db": -4.45052695906282,
+    "hdlc_flags": 15,
+    "flags_by_chance": 14.96875
+  }
+}

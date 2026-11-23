@@ -26,3 +26,4 @@ httpx>=0.27
 
 # Orbit view (SatNOGS vetting)
 skyfield>=1.49
+soundfile>=0.12        # reading SatNOGS audio (scripts/decode_bpsk_audio.py)
