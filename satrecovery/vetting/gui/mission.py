@@ -390,7 +390,32 @@ class ReplayScreen(QWidget):
         self.sky.raise_()
         self.link = LinkPanel()
         middle.addLayout(left, 3)
-        right = QVBoxLayout()
+        # Right column: the recording, or the data packets decoded from it.
+        from ..frames import FrameStore
+        from .messages import MessagesPanel
+
+        column = QVBoxLayout()
+        tabs = QHBoxLayout()
+        self.page_buttons = {}
+        for name in ("Recording", "Messages"):
+            button = QPushButton(name)
+            button.setObjectName("quiet")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, n=name: self.set_page(n))
+            self.page_buttons[name] = button
+            tabs.addWidget(button)
+        tabs.addStretch(1)
+        column.addLayout(tabs)
+        self.pages = QStackedWidget()
+        recording_page = QWidget()
+        right = QVBoxLayout(recording_page)
+        right.setContentsMargins(0, 0, 0, 0)
+        root_data = Path(__file__).resolve().parents[3] / "satrecovery_data" / "satnogs"
+        self.messages = MessagesPanel(FrameStore(root_data) if explainer is not None else None)
+        self.messages.counted.connect(lambda n: self.page_buttons["Messages"].setText(f"Messages ({n})"))
+        self.pages.addWidget(recording_page)
+        self.pages.addWidget(self.messages)
+        column.addWidget(self.pages, 1)
         right.addWidget(label("WHAT THE ANTENNA HEARD", "caps"))
         self.scope = pg.PlotWidget(background=theme.BG)
         self.scope.setMenuEnabled(False)
@@ -415,7 +440,7 @@ class ReplayScreen(QWidget):
         right.addWidget(self.caption)
         right.addWidget(label("THE RADIO LINK, NOW", "caps", wrap=False))
         right.addWidget(self.link)
-        middle.addLayout(right, 2)
+        middle.addLayout(column, 2)
         outer.addLayout(middle, 1)
 
         card = QFrame()
@@ -479,6 +504,11 @@ class ReplayScreen(QWidget):
         self.sky.move(self.views.width() - self.sky.width() - 12, 12)
         self.sky.raise_()
 
+    def set_page(self, name: str) -> None:
+        self.pages.setCurrentWidget(self.messages if name == "Messages" else self.pages.widget(0))
+        for key, button in self.page_buttons.items():
+            button.setChecked(key == name)
+
     def set_view(self, name: str) -> None:
         self.views.setCurrentWidget({"Globe": self.globe, "Sky": self.skymap}.get(name, self.map))
         # The small sky inset would repeat the Sky view, so hide it there.
@@ -509,6 +539,8 @@ class ReplayScreen(QWidget):
         self.skymap.set_pass(self._station_or_default(obs), obs.station_name, None, obs.start, satellite)
         self.sky.set_tracks(None, [])
         self.next_passes.setText("")
+        self.messages.show_observation(obs)
+        self.set_page("Recording")
         try:
             site = self._explainer.stations.site(obs) if self._explainer else None
             if site is not None and obs.tle is not None and obs.start is not None:
@@ -639,7 +671,10 @@ class ReplayScreen(QWidget):
         colour = {"heard": theme.SIGNAL, "not heard": theme.NO_SIGNAL}.get(story.mark, theme.UNSURE)
         self.symbol.setText(f"<span style='font-size:44px; color:{colour}'>{story.symbol}</span>")
         self.headline.setText(f"<span style='color:{colour}'>{story.headline}</span>")
-        self.sentence.setText(story.sentence)
+        packets = self._item.obs.n_decoded_frames if self._item is not None else 0
+        extra = (f"  The station also decoded {packets} data packet{'s' if packets != 1 else ''} from this pass: "
+                 f"open Messages to see what it sent." if packets and story.mark != "not heard" else "")
+        self.sentence.setText(story.sentence + extra)
         self.dots.set(story.dots, colour)
 
     # -- playback --------------------------------------------------------

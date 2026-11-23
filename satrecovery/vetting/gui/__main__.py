@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--replay", type=int, help="open the replay of this observation")
     parser.add_argument("--screen", choices=("launcher", "intro", "home"), default="launcher")
     parser.add_argument("--view", choices=("map", "globe", "sky"), default="map", help="replay: flat map, 3D globe or sky")
+    parser.add_argument("--page", choices=("recording", "messages"), default="recording",
+                        help="replay: the recording or the decoded packets")
     parser.add_argument("--at", type=float, help="with --replay --screenshot: pause this far into the pass (0..1)")
     args = parser.parse_args(argv)
 
@@ -94,8 +96,19 @@ def main(argv: list[str] | None = None) -> int:
                                start="home" if args.replay else args.screen)
         window.show()
         if args.replay:
+            known = {i.obs.id for i in session.all_items}
+            if args.replay not in known:
+                # Not among the newest loaded: look it up in every saved list.
+                for name in ("latest.jsonl", "manifest.jsonl", "unvetted.jsonl"):
+                    found = [o for o in Manifest(data / name) if o.id == args.replay]
+                    if found and session.add(found):
+                        break
+            if args.replay not in {i.obs.id for i in session.all_items}:
+                print(f"Recording {args.replay} is not in the saved recordings.")
+                return 1
             window.open_replay(args.replay)
             window.replay.set_view(args.view.capitalize())
+            window.replay.set_page(args.page.capitalize())
     if feed is not None and not args.screenshot:
         feed.start()
     if args.screenshot:
@@ -103,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
             from PySide6.QtCore import QThreadPool
 
             QThreadPool.globalInstance().waitForDone(30000)
+            app.processEvents()
+            import time as _time
+
+            _time.sleep(1.5)            # the packet download runs on its own thread
             app.processEvents()
             if hasattr(window, "replay") and args.replay:
                 if args.at is not None:
