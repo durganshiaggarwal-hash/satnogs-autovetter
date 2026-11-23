@@ -45,7 +45,7 @@ def trained(tmp_path):
         obs = observation(i, "with-signal" if i % 2 else "without-signal")
         manifest.add(obs)
         WaterfallImage(synthetic(bool(i % 2), rng)).save(cache.waterfall_path(obs))
-    return VetterBundle.train(manifest, cache), cache, tmp_path, rng
+    return VetterBundle.train(manifest, cache, cnn=False), cache, tmp_path, rng
 
 
 class TestBundle:
@@ -225,3 +225,57 @@ def test_link_panel_timeline_and_globe_draw_a_real_pass():
             widget.set_time(1000.0, 1.0, "a subtitle")
         assert not widget.grab().isNull()
     app.processEvents()
+
+
+
+class TestCombinedBundle:
+    """The app's model: the forest and the CNN averaged, with a forest-only fallback."""
+
+    def test_trains_saves_and_scores_with_the_cnn(self, tmp_path):
+        from satrecovery.vetting.bundle import CNN_FILE
+
+        rng = np.random.default_rng(11)
+        cache = ArtifactCache(tmp_path)
+        manifest = Manifest(tmp_path / "manifest.jsonl")
+        for i in range(1, 81):
+            obs = observation(i, "with-signal" if i % 2 else "without-signal")
+            manifest.add(obs)
+            WaterfallImage(synthetic(bool(i % 2), rng)).save(cache.waterfall_path(obs))
+        bundle = VetterBundle.train(manifest, cache, cnn=True, epochs=2)
+        assert bundle.cnn is not None and bundle.oof_forest is not None
+        assert "CNN" in bundle.description
+        # The stored out-of-fold scores are the average of the two models' own.
+        assert not np.allclose(bundle.oof_probability, bundle.oof_forest)
+        bundle.save(tmp_path / "m")
+        assert (tmp_path / "m" / CNN_FILE).exists()
+
+        again = VetterBundle.load(tmp_path / "m")
+        assert again.cnn is not None
+        session = VettingSession.from_bundle(again, [], cache)
+        fresh = observation(900)
+        WaterfallImage(synthetic(True, rng)).save(cache.waterfall_path(fresh))
+        added = session.add([fresh])
+        assert len(added) == 1 and 0.0 <= added[0].probability <= 1.0
+
+    def test_forest_only_bundle_drops_an_old_cnn_and_still_works(self, trained):
+        from satrecovery.vetting.bundle import CNN_FILE
+
+        bundle, cache, root, rng = trained
+        (root / "m").mkdir()
+        (root / "m" / CNN_FILE).write_bytes(b"left over from an earlier build")
+        bundle.save(root / "m")
+        assert not (root / "m" / CNN_FILE).exists()
+        again = VetterBundle.load(root / "m")
+        assert again.cnn is None and "CNN" not in again.description
+        session = VettingSession.from_bundle(again, [], cache)
+        fresh = observation(901)
+        WaterfallImage(synthetic(True, rng)).save(cache.waterfall_path(fresh))
+        assert len(session.add([fresh])) == 1
+
+    def test_a_damaged_cnn_file_falls_back_to_the_forest(self, trained):
+        from satrecovery.vetting.bundle import CNN_FILE
+
+        bundle, cache, root, _ = trained
+        bundle.save(root / "m2")
+        (root / "m2" / CNN_FILE).write_bytes(b"not a model")
+        assert VetterBundle.load(root / "m2").cnn is None

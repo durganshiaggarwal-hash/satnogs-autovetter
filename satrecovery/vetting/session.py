@@ -342,8 +342,7 @@ class VettingSession:
                     policy: Policy = Policy(), log_path: str | Path | None = None, progress=None) -> "VettingSession":
         """The app's normal start: a saved, trained vetter and whatever recordings are at hand."""
         session = cls([], cache, bundle.explainer, policy, DecisionLog(log_path),
-                      model_name=f"Forest on {len(FEATURES)} measurements, trained on {bundle.n_train:,} "
-                                 f"volunteer-checked observations", model=bundle.model, bundle=bundle)
+                      model_name=bundle.description, model=bundle.model, bundle=bundle)
         session.add(list(observations), progress)
         return session
 
@@ -355,9 +354,15 @@ class VettingSession:
         kept, features = FeatureStore(self._cache).get(fresh, progress)
         if not kept:
             return []
-        probability = self._model.predict_proba_features(features)
         if self._bundle is not None:
-            probability = self._bundle.calibrate(probability)
+            images = None
+            if self._bundle.cnn is not None:
+                from .bundle import waterfall_images
+
+                images = waterfall_images(kept, self._cache)
+            probability = self._bundle.predict(features, images)
+        else:
+            probability = self._model.predict_proba_features(features)
         items = [Item(o, float(p), self.policy.verdict(float(p)), f) for o, p, f in zip(kept, probability, features)]
         self._all.extend(items)
         self._by_id.update({i.obs.id: i for i in items})
