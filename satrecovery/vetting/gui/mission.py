@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QStackedWidget,
     QVBoxLayout,
+    QSizePolicy,
     QWidget,
 )
 
@@ -45,29 +46,44 @@ from ..session import Item, Verdict, VettingSession
 from ..narration import PassNarrator, Places
 from ..story import Story, tell
 from . import theme
+from .backdrop import OrbitHero, StarryScreen, count_up, fade_in
 from .orbit_view import OrbitWorker
 
 LAND_FILE = Path(__file__).resolve().parent / "assets" / "land_110m.json"
 
-INK = "#e9eef4"
-SOFT = "#9aa5b4"
-OCEAN_TOP, OCEAN_BOTTOM = "#0b1320", "#0a0f17"
-LAND, COAST, GRID = "#1a2330", "#2b3747", "#141c27"
-STATION = "#f0c35a"
+INK = theme.TEXT
+SOFT = "#c9c9c9"
+OCEAN_TOP, OCEAN_BOTTOM = "#3a4552", "#2a3038"
+LAND, COAST, GRID = "#4f4f4f", "#757575", "#36404b"
+STATION = theme.UNSURE
 
 STYLE = theme.STYLE + f"""
-QLabel#hero {{ font-family: "{theme.SANS}"; font-size: 34px; font-weight: 700; color: {INK}; }}
-QLabel#lead {{ font-family: "{theme.SANS}"; font-size: 15px; color: {SOFT}; }}
-QLabel#h2 {{ font-family: "{theme.SANS}"; font-size: 20px; font-weight: 700; color: {INK}; }}
-QLabel#body {{ font-family: "{theme.SANS}"; font-size: 13px; color: {SOFT}; }}
-QLabel#stat {{ font-family: "{theme.SANS}"; font-size: 40px; font-weight: 800; color: {INK}; }}
-QFrame#card {{ background: {theme.PANEL}; border: 1px solid {theme.RULE}; border-radius: 10px; }}
-QFrame#card:hover {{ border-color: {theme.DIM}; }}
-QPushButton#big {{ font-family: "{theme.SANS}"; font-size: 14px; font-weight: 600; padding: 10px 18px;
-                   border-radius: 8px; border: 1px solid {theme.ACCENT}; color: {theme.ACCENT}; background: transparent; }}
-QPushButton#quiet {{ font-family: "{theme.SANS}"; font-size: 13px; padding: 8px 14px; border-radius: 8px;
-                     border: 1px solid {theme.RULE}; color: {SOFT}; background: transparent; }}
+QLabel#hero {{ font-family: "{theme.SANS_BOLD}"; font-size: 40px; letter-spacing: 7px; color: {INK}; }}
+QLabel#lead {{ font-family: "{theme.SANS_SEMIBOLD}"; font-size: 19px; letter-spacing: 1px; color: {theme.ACCENT}; }}
+QLabel#h2 {{ font-family: "{theme.SANS_SEMIBOLD}"; font-size: 21px; letter-spacing: 2px; color: {theme.ACCENT}; }}
+QLabel#body {{ font-family: "{theme.SANS}"; font-size: 15px; color: {SOFT}; }}
+QLabel#stat {{ font-family: "{theme.SANS_BOLD}"; font-size: 46px; letter-spacing: 2px; color: {INK}; }}
+QFrame#card {{ background: rgba(74, 74, 74, 225); border: 1px solid {theme.RULE}; border-radius: 0; }}
+QFrame#card:hover {{ border-color: {theme.ACCENT}; }}
+QFrame#divider {{ background: {theme.RULE}; max-height: 1px; min-height: 1px; }}
+QPushButton#big {{ font-family: "{theme.SANS_SEMIBOLD}"; font-size: 17px; padding: 12px 8px; border: none;
+                   border-bottom: 1px solid {INK}; color: {INK}; background: transparent; }}
+QPushButton#big:hover {{ color: {theme.ACCENT}; border-bottom: 2px solid {theme.ACCENT}; }}
+QPushButton#quiet {{ font-family: "{theme.SANS_SEMIBOLD}"; font-size: 15px; padding: 9px 8px; border: none;
+                     border-bottom: 1px solid {theme.LINE}; color: {theme.ACCENT}; background: transparent; }}
+QPushButton#quiet:hover {{ border-bottom: 2px solid {theme.ACCENT}; }}
 """
+
+
+def heading(text: str) -> str:
+    """Headings are set in capitals, as in the rest of the app."""
+    return text.upper()
+
+
+def divider() -> QFrame:
+    line = QFrame()
+    line.setObjectName("divider")
+    return line
 
 
 def label(text: str, name: str, wrap: bool = True) -> QLabel:
@@ -117,7 +133,7 @@ class WorldMap(QWidget):
         if not self._caption:
             return
         font = QFont(theme.SANS)
-        font.setPixelSize(16)
+        font.setPixelSize(18)
         font.setWeight(QFont.Medium)
         painter.setFont(font)
         width = min(self.width() - 60, 760)
@@ -127,8 +143,9 @@ class WorldMap(QWidget):
         height = needed.height() + 22
         box = QRectF((self.width() - width) / 2, self.height() - height - 30, width, height)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(6, 10, 16, 215))
-        painter.drawRoundedRect(box, 8, 8)
+        painter.setBrush(QColor(0, 0, 0, 215))
+        painter.drawRect(box)
+        painter.fillRect(QRectF(box.left(), box.top(), 3, box.height()), QColor(theme.ACCENT))
         painter.setPen(QColor(INK))
         painter.drawText(box.adjusted(16, 10, -16, -10), Qt.TextWordWrap | Qt.AlignHCenter | Qt.AlignVCenter,
                          self._caption)
@@ -160,7 +177,7 @@ class WorldMap(QWidget):
         self._subtitle(painter)
         painter.setPen(QColor(theme.FAINT))
         font = QFont(theme.SANS)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         painter.drawText(QRectF(8, self.height() - 18, 400, 14), Qt.AlignLeft,
                          "Map: Natural Earth (public domain).  Path and coverage from the satellite's orbit.")
@@ -224,8 +241,8 @@ class WorldMap(QWidget):
             if self._pulse > 0.35:
                 self._pulses(painter, sx, sy, float(px), float(py), self._t)
         glow = QRadialGradient(QPointF(sx, sy), 18)
-        glow.setColorAt(0, QColor(86, 200, 216, 180))
-        glow.setColorAt(1, QColor(86, 200, 216, 0))
+        glow.setColorAt(0, QColor(*theme.ACCENT_RGB, 180))
+        glow.setColorAt(1, QColor(*theme.ACCENT_RGB, 0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(glow)
         painter.drawEllipse(QPointF(sx, sy), 18, 18)
@@ -285,7 +302,7 @@ class WorldMap(QWidget):
         painter.drawEllipse(QPointF(x, y), 4, 4)
         painter.setPen(QColor(INK))
         font = QFont(theme.SANS)
-        font.setPixelSize(12)
+        font.setPixelSize(14)
         font.setBold(True)
         painter.setFont(font)
         painter.drawText(QRectF(x + 10, y - 9, 260, 18), Qt.AlignLeft | Qt.AlignVCenter,
@@ -314,7 +331,6 @@ class Dots(QWidget):
 
 class ReplayScreen(QWidget):
     back = Signal()
-    expert = Signal(int)
 
     SECONDS_PER_PASS = 14.0   # a whole pass plays in this long at 1x
 
@@ -337,7 +353,7 @@ class ReplayScreen(QWidget):
         outer.setContentsMargins(28, 20, 28, 20)
         outer.setSpacing(14)
         top = QHBoxLayout()
-        back = QPushButton("←  Home")
+        back = QPushButton("Home")
         back.setObjectName("quiet")
         back.clicked.connect(self.back.emit)
         top.addWidget(back)
@@ -348,10 +364,6 @@ class ReplayScreen(QWidget):
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
         top.addLayout(titles, 1)
-        expert = QPushButton("Expert mode  →")
-        expert.setObjectName("quiet")
-        expert.clicked.connect(lambda: self._item and self.expert.emit(self._item.obs.id))
-        top.addWidget(expert)
         outer.addLayout(top)
 
         from .globe import GlobeMap
@@ -364,16 +376,18 @@ class ReplayScreen(QWidget):
         left = QVBoxLayout()
         left.setSpacing(10)
         switch = QHBoxLayout()
+        switch.setSpacing(0)
         switch.addWidget(label("THE PASS", "caps", wrap=False))
-        switch.addStretch(1)
+        switch.addSpacing(18)
         self.view_buttons = {}
         for name in ("Map", "Globe", "Sky"):
             button = QPushButton(name)
-            button.setObjectName("quiet")
+            button.setObjectName("tab")
             button.setCheckable(True)
             button.clicked.connect(lambda _=False, n=name: self.set_view(n))
             self.view_buttons[name] = button
             switch.addWidget(button)
+        switch.addStretch(1)
         left.addLayout(switch)
         self.views = QStackedWidget()
         self.map = WorldMap()
@@ -396,10 +410,13 @@ class ReplayScreen(QWidget):
 
         column = QVBoxLayout()
         tabs = QHBoxLayout()
+        tabs.setSpacing(0)
+        tabs.addWidget(label("THE RECORDING", "caps", wrap=False))
+        tabs.addSpacing(18)
         self.page_buttons = {}
         for name in ("Recording", "Messages"):
             button = QPushButton(name)
-            button.setObjectName("quiet")
+            button.setObjectName("tab")
             button.setCheckable(True)
             button.clicked.connect(lambda _=False, n=name: self.set_page(n))
             self.page_buttons[name] = button
@@ -447,8 +464,9 @@ class ReplayScreen(QWidget):
         card.setObjectName("card")
         row = QHBoxLayout(card)
         row.setContentsMargins(20, 16, 20, 16)
+        # The verdict as a word in a coloured tile (no symbols).
         self.symbol = QLabel()
-        self.symbol.setFixedWidth(64)
+        self.symbol.setFixedWidth(150)
         self.symbol.setAlignment(Qt.AlignCenter)
         row.addWidget(self.symbol)
         words = QVBoxLayout()
@@ -470,7 +488,7 @@ class ReplayScreen(QWidget):
         row.addLayout(words, 1)
         controls = QVBoxLayout()
         buttons = QHBoxLayout()
-        self.play = QPushButton("❚❚  Pause")
+        self.play = QPushButton("Pause")
         self.play.setObjectName("big")
         self.play.clicked.connect(self.toggle)
         buttons.addWidget(self.play)
@@ -661,7 +679,7 @@ class ReplayScreen(QWidget):
         done = self._t >= self._t1 - 1e-6
         story = self._final_story
         if story is None or not done:
-            self.symbol.setText(f"<span style='font-size:40px; color:{theme.DIM}'>…</span>")
+            self._tag("LISTENING", theme.DIM)
             self.headline.setText("Listening…" if story is None or not done else story.headline)
             self.sentence.setText("Playing back the pass. The verdict appears at the end."
                                   if story is not None else "Working out the satellite's path and every "
@@ -669,7 +687,7 @@ class ReplayScreen(QWidget):
             self.dots.set(0, theme.DIM)
             return
         colour = {"heard": theme.SIGNAL, "not heard": theme.NO_SIGNAL}.get(story.mark, theme.UNSURE)
-        self.symbol.setText(f"<span style='font-size:44px; color:{colour}'>{story.symbol}</span>")
+        self._tag({"heard": "HEARD", "not heard": "NOT HEARD"}.get(story.mark, "UNSURE"), colour)
         self.headline.setText(f"<span style='color:{colour}'>{story.headline}</span>")
         packets = self._item.obs.n_decoded_frames if self._item is not None else 0
         extra = (f"  The station also decoded {packets} data packet{'s' if packets != 1 else ''} from this pass: "
@@ -677,38 +695,44 @@ class ReplayScreen(QWidget):
         self.sentence.setText(story.sentence + extra)
         self.dots.set(story.dots, colour)
 
+    def _tag(self, word: str, colour: str) -> None:
+        self.symbol.setText(word)
+        self.symbol.setStyleSheet(f"color: {colour}; background: {theme.RAISED}; border-left: 3px solid {colour}; "
+                                  f"font-family: \"{theme.SANS_BOLD}\"; font-size: 16px; letter-spacing: 3px; "
+                                  f"padding: 22px 8px;")
+
     # -- playback --------------------------------------------------------
     def restart(self) -> None:
         self._t = self._t0
         self._clock.restart()
         self._timer.start()
-        self.play.setText("❚❚  Pause")
+        self.play.setText("Pause")
         self._update_frame()
 
     def toggle(self) -> None:
         if self._timer.isActive():
             self._timer.stop()
-            self.play.setText("▶  Play")
+            self.play.setText("Play")
         else:
             if self._t >= self._t1:
                 self.restart()
                 return
             self._clock.restart()
             self._timer.start()
-            self.play.setText("❚❚  Pause")
+            self.play.setText("Pause")
 
     def seek(self, fraction: float) -> None:
         """Pause at a point of the pass (0 = start of the recording, 1 = end)."""
         self._t = self._t0 + (self._t1 - self._t0) * float(np.clip(fraction, 0, 1))
         self._timer.stop()
-        self.play.setText("▶  Play")
+        self.play.setText("Play")
         self._update_frame()
 
     def finish(self) -> None:
         """Jump to the end (tests, screenshots)."""
         self._t = self._t1
         self._timer.stop()
-        self.play.setText("↻  Replay")
+        self.play.setText("Replay")
         self._update_frame()
 
     def _cycle_speed(self) -> None:
@@ -725,7 +749,7 @@ class ReplayScreen(QWidget):
         if self._t >= self._t1:
             self._t = self._t1
             self._timer.stop()
-            self.play.setText("↻  Replay")
+            self.play.setText("Replay")
         self._update_frame()
 
     def _update_frame(self) -> None:
@@ -794,10 +818,10 @@ class Step(QWidget):
         elif self._kind == "check":
             rect = QRectF(cx - 40, cy - 40, 80, 80)
             gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-            gradient.setColorAt(0, QColor("#3b0f70"))
-            gradient.setColorAt(1, QColor("#000004"))
+            gradient.setColorAt(0, QColor(theme.ACCENT_FILL))
+            gradient.setColorAt(1, QColor(theme.BG))
             painter.fillRect(rect, gradient)
-            painter.setPen(QPen(QColor("#fcffa4"), 2))
+            painter.setPen(QPen(QColor(theme.UNSURE), 2))
             painter.drawLine(QPointF(cx, cy - 36), QPointF(cx, cy + 36))
             painter.setPen(QPen(ink, 2))
             painter.drawRect(rect)
@@ -810,12 +834,16 @@ class Step(QWidget):
             path.cubicTo(cx - 10, cy - 40, cx + 10, cy - 40, cx + 40, cy + 18)
             painter.setPen(QPen(accent, 2))
             painter.drawPath(path)
-            painter.setPen(QPen(QColor(theme.SIGNAL), 4))
-            painter.drawLine(QPointF(cx + 30, cy - 28), QPointF(cx + 36, cy - 20))
-            painter.drawLine(QPointF(cx + 36, cy - 20), QPointF(cx + 50, cy - 40))
+            # The satellite on its predicted path: a solid dot with a ring.
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(theme.SIGNAL))
+            painter.drawEllipse(QPointF(cx + 20, cy - 23), 5, 5)
+            painter.setPen(QPen(QColor(theme.SIGNAL), 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(QPointF(cx + 20, cy - 23), 10, 10)
 
 
-class IntroScreen(QWidget):
+class IntroScreen(StarryScreen):
     start = Signal()
 
     STEPS = (
@@ -830,7 +858,7 @@ class IntroScreen(QWidget):
         super().__init__(parent)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(60, 60, 60, 50)
-        outer.addWidget(label("Listening to satellites", "hero"))
+        outer.addWidget(label(heading("Listening to satellites"), "hero"))
         outer.addWidget(label("Thousands of satellite recordings are made every day by volunteers, and nobody has "
                               "time to check them all. This app checks them, and says when it isn't sure.", "lead"))
         outer.addSpacing(40)
@@ -878,13 +906,13 @@ class RecordingCard(QPushButton):
                  parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("recording")
-        self.setMinimumHeight(96)
+        self.setFixedHeight(112)
         self.setMinimumWidth(250)
         self.setCursor(Qt.PointingHandCursor)
         obs = item.obs
         self.obs_id = obs.id
-        mark, colour = {Verdict.SIGNAL: ("✔  heard", theme.SIGNAL), Verdict.NO_SIGNAL: ("✖  nothing heard", theme.NO_SIGNAL)
-                        }.get(item.verdict, ("?  unsure", theme.UNSURE))
+        mark, colour = {Verdict.SIGNAL: ("HEARD", theme.SIGNAL), Verdict.NO_SIGNAL: ("NOTHING HEARD", theme.NO_SIGNAL)
+                        }.get(item.verdict, ("UNSURE", theme.UNSURE))
         ago = ""
         if obs.end is not None:
             from datetime import datetime, timezone
@@ -903,36 +931,43 @@ class RecordingCard(QPushButton):
         words = QVBoxLayout()
         words.setSpacing(2)
         top = QHBoxLayout()
-        verdict = QLabel(title or mark)
-        verdict.setStyleSheet(f"color: {colour}; font-weight: 600; font-size: 12px;")
+        verdict = QLabel((title or mark).upper())
+        verdict.setStyleSheet(f"color: {colour}; font-family: \"{theme.SANS_SEMIBOLD}\"; font-size: 12px; "
+                              f"letter-spacing: 2px;")
         top.addWidget(verdict, 1)
-        when = QLabel(ago)
-        when.setStyleSheet(f"color: {theme.FAINT}; font-size: 11px;")
+        when = QLabel("" if title else ago)      # a titled card has a long title: its age goes below
+        when.setStyleSheet(f"color: {theme.DIM}; font-size: 13px;")
         top.addWidget(when)
         words.addLayout(top)
         name = QLabel(satellite or f"NORAD {obs.norad_cat_id}")
-        name.setStyleSheet(f"color: {INK}; font-size: 14px; font-weight: 700;")
+        name.setStyleSheet(f"color: {INK}; font-family: \"{theme.SANS_BOLD}\"; font-size: 17px; letter-spacing: 1px;")
         words.addWidget(name)
-        detail = QLabel(f"{obs.transmitter_mode or '?'}  ·  {(obs.station_name or 'unknown station')[:28]}")
-        detail.setStyleSheet(f"color: {SOFT}; font-size: 11px;")
+        detail = QLabel(f"{obs.transmitter_mode or '?'}  ·  {(obs.station_name or 'unknown station')[:28]}"
+                        + (f"  ·  {ago}" if title and ago else ""))
+        detail.setStyleSheet(f"color: {SOFT}; font-size: 13px;")
         words.addWidget(detail)
         words.addStretch(1)
         for label_ in (verdict, when, name, detail):
             label_.setAttribute(Qt.WA_TransparentForMouseEvents)
+        for label_ in (verdict, name, detail):
+            # long titles are cut at the card's edge instead of widening it, so every card stays on the grid
+            label_.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         row.addLayout(words, 1)
         self.setStyleSheet(f"QPushButton#recording {{ background: {theme.PANEL}; border: 1px solid {theme.RULE}; "
-                           f"border-left: 3px solid {colour}; border-radius: 8px; text-align: left; }}"
-                           f"QPushButton#recording:hover {{ border-color: {theme.DIM}; border-left-color: {colour}; }}")
+                           f"border-left: 3px solid {colour}; border-radius: 0; padding: 0; text-align: left; }}"
+                           f"QPushButton#recording:hover {{ background: {theme.RAISED}; border-color: {theme.SELECTED}; "
+                           f"border-left-color: {colour}; }}")
 
 
-class HomeScreen(QWidget):
+class HomeScreen(StarryScreen):
     replay = Signal(int)
-    expert = Signal()
+    ai = Signal()
     intro = Signal()
     refresh_requested = Signal()
     back = Signal()
 
     SHOWN = 8
+    COLUMNS = 4
 
     def __init__(self, session: VettingSession, showcase: tuple = (), parent=None, names=None) -> None:
         super().__init__(parent)
@@ -944,12 +979,12 @@ class HomeScreen(QWidget):
         outer.setContentsMargins(60, 36, 60, 32)
         outer.setSpacing(10)
         top = QHBoxLayout()
-        back = QPushButton("←")
+        back = QPushButton("Back")
         back.setObjectName("quiet")
         back.clicked.connect(self.back.emit)
         top.addWidget(back)
-        top.addWidget(label("Live satellites", "hero"), 1)
-        for text, signal in (("How it works", self.intro), ("Expert mode  →", self.expert)):
+        top.addWidget(label(heading("Live satellites"), "hero"), 1)
+        for text, signal in (("How it works", self.intro), ("How good is the AI  →", self.ai)):
             button = QPushButton(text)
             button.setObjectName("quiet")
             button.clicked.connect(signal.emit)
@@ -959,10 +994,9 @@ class HomeScreen(QWidget):
                               "checked as they arrive.", "lead"))
         outer.addSpacing(18)
 
-        self._stats = QHBoxLayout()
-        self._stats.setSpacing(20)
+        self._stats = self._grid()
         self._stat_labels = []
-        for _ in range(3):
+        for column in range(self.COLUMNS):
             card = QFrame()
             card.setObjectName("card")
             inside = QVBoxLayout(card)
@@ -970,30 +1004,43 @@ class HomeScreen(QWidget):
             value, text = label("–", "stat"), label("", "body")
             inside.addWidget(value)
             inside.addWidget(text)
+            card.setFixedHeight(132)
             self._stat_labels.append((value, text))
-            self._stats.addWidget(card)
+            self._stats.addWidget(card, 0, column)
         outer.addLayout(self._stats)
         outer.addSpacing(18)
 
-        heading = QHBoxLayout()
-        heading.addWidget(label("Latest recordings", "h2"), 1)
+        outer.addWidget(divider())
+        outer.addSpacing(10)
+        row = QHBoxLayout()
+        row.addWidget(label(heading("Latest recordings"), "h2"), 1)
         self.feed_status = label("", "body", wrap=False)
-        heading.addWidget(self.feed_status)
-        refresh = QPushButton("↻  Fetch newest")
+        row.addWidget(self.feed_status)
+        row.addSpacing(16)
+        refresh = QPushButton("Fetch newest  →")
         refresh.setObjectName("quiet")
         refresh.clicked.connect(self.refresh_requested.emit)
-        heading.addWidget(refresh)
-        outer.addLayout(heading)
-        self._latest = QGridLayout()
-        self._latest.setSpacing(14)
+        row.addWidget(refresh)
+        outer.addLayout(row)
+        self._latest = self._grid()
         outer.addLayout(self._latest)
-        outer.addSpacing(14)
-        outer.addWidget(label("Explained by the physics", "h2"))
-        self._examples = QHBoxLayout()
-        self._examples.setSpacing(14)
+        outer.addSpacing(18)
+        outer.addWidget(divider())
+        outer.addSpacing(10)
+        outer.addWidget(label(heading("Explained by the physics"), "h2"))
+        self._examples = self._grid()
         outer.addLayout(self._examples)
         outer.addStretch(1)
         self.refresh()
+
+    def _grid(self) -> QGridLayout:
+        """Every row of cards on one grid: equal columns, so boxes line up down the page."""
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(18)
+        for column in range(self.COLUMNS):
+            grid.setColumnStretch(column, 1)
+        return grid
 
     def set_status(self, text: str) -> None:
         self.feed_status.setText(text[:90])
@@ -1010,19 +1057,19 @@ class HomeScreen(QWidget):
             (f"{len(latest)}", f"latest recordings loaded · {unchecked} not checked by any volunteer"),
             (f"{sure / len(latest):.0%}" if latest else "–", "of them the AI is sure enough to check on its own"),
             (f"{1 - error:.0%}" if error == error else "–",
-             f"right when it is sure, tested on {measured:,} confident answers on recordings volunteers had checked"),
+             f"right when it is sure, tested on {measured:,} answers volunteers had checked"),
+            (f"{len({i.obs.norad_cat_id for i in latest})}", "different satellites among them"),
         ]
         for (value, text), (v, t) in zip(self._stat_labels, numbers):
-            value.setText(v)
+            if value.text() != v:
+                count_up(value, v)      # numbers roll up when they change
             text.setText(t)
-        self._fill(self._latest, [self._card(i) for i in latest[:self.SHOWN]], columns=4,
+        self._fill(self._latest, [self._card(i) for i in latest[:self.SHOWN]], columns=self.COLUMNS,
                    empty="Recordings appear here as they download.")
         titles = {15489000: "Not a satellite at all", 15490378: "The wrong satellite"}
         examples = [self._card(session.item(o.id), titles.get(o.id)) for o in self._showcase
                     if o.id in {i.obs.id for i in session.all_items}]
-        for card in examples:
-            card.setMinimumWidth(320)
-        self._fill(self._examples, examples, empty="")
+        self._fill(self._examples, examples, columns=self.COLUMNS, empty="")
 
     def _card(self, item: Item, title: str | None = None) -> RecordingCard:
         if item.obs.id not in self._thumbs:
@@ -1050,11 +1097,17 @@ class HomeScreen(QWidget):
                 layout.addWidget(card, n // columns, n % columns)
             else:
                 layout.addWidget(card)
+        if columns:
+            # empty placeholders keep a short last row on the same columns as the rows above
+            for n in range(len(cards), -(-len(cards) // columns) * columns):
+                spacer = QWidget()
+                spacer.setStyleSheet("background: transparent;")
+                layout.addWidget(spacer, n // columns, n % columns)
         if not columns:
             layout.addStretch(1)
 
 
-class LauncherScreen(QWidget):
+class LauncherScreen(StarryScreen):
     """The front door: the two halves of the project."""
 
     lab = Signal()
@@ -1063,11 +1116,21 @@ class LauncherScreen(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(60, 60, 60, 50)
-        outer.addWidget(label("Satellite Signal Analyser", "hero"))
-        outer.addWidget(label("Identifying and recovering satellite signals with AI: first on a lab dataset, "
+        outer.setContentsMargins(60, 30, 60, 50)
+        top = QHBoxLayout()
+        words = QVBoxLayout()
+        words.addStretch(1)
+        words.addWidget(label(heading("Satellite Signal Analyser"), "hero"))
+        words.addSpacing(8)
+        words.addWidget(label("Identifying and recovering satellite signals with AI: first on a lab dataset, "
                               "then on a live network of real ground stations.", "lead"))
-        outer.addSpacing(40)
+        words.addStretch(1)
+        top.addLayout(words, 3)
+        self.hero = OrbitHero()
+        self.hero.setFixedHeight(270)
+        top.addWidget(self.hero, 2)
+        outer.addLayout(top)
+        outer.addSpacing(24)
         doors = QHBoxLayout()
         doors.setSpacing(28)
         for title, text, details, signal, kind in (
@@ -1083,7 +1146,7 @@ class LauncherScreen(QWidget):
             inside = QVBoxLayout(card)
             inside.setContentsMargins(26, 24, 26, 24)
             inside.addWidget(Step(kind))
-            inside.addWidget(label(title, "hero"))
+            inside.addWidget(label(heading(title), "hero"))
             inside.addWidget(label(text, "h2"))
             inside.addWidget(label(details, "body"))
             inside.addStretch(1)
@@ -1097,7 +1160,7 @@ class LauncherScreen(QWidget):
 
 
 class MissionWindow(QMainWindow):
-    """The app: the launcher, the live half (how it works, home, replay) and expert mode on request."""
+    """The app: the launcher and the live half (how it works, home, replay, how good is the AI)."""
 
     def __init__(self, session: VettingSession, explainer=None, show_intro: bool = True, feed=None,
                  showcase: tuple = (), start: str = "launcher") -> None:
@@ -1114,7 +1177,11 @@ class MissionWindow(QMainWindow):
         names = (lambda obs: explainer.catalog.name(int(obs.norad_cat_id or 0))) if explainer is not None else None
         self.home = HomeScreen(session, showcase, names=names)
         self.replay = ReplayScreen(session, explainer)
-        for screen in (self.launcher, self.intro, self.home, self.replay):
+        from .ai_view import ModelBoard
+
+        bundle = getattr(session, "_bundle", None)
+        self.ai = ModelBoard(in_use="cnn+forest" if bundle is not None and bundle.cnn is not None else "forest")
+        for screen in (self.launcher, self.intro, self.home, self.replay, self.ai):
             self.stack.addWidget(screen)
         self.setCentralWidget(self.stack)
         self._seen_intro = not show_intro
@@ -1124,10 +1191,10 @@ class MissionWindow(QMainWindow):
         self.home.intro.connect(lambda: self.stack.setCurrentWidget(self.intro))
         self.home.back.connect(lambda: self.stack.setCurrentWidget(self.launcher))
         self.home.replay.connect(self.open_replay)
-        self.home.expert.connect(lambda: self.open_expert(None))
+        self.home.ai.connect(lambda: self.stack.setCurrentWidget(self.ai))
+        self.ai.back.connect(lambda: self.stack.setCurrentWidget(self.home))
         self.home.refresh_requested.connect(self.fetch_newest)
         self.replay.back.connect(lambda: self.stack.setCurrentWidget(self.home))
-        self.replay.expert.connect(self.open_expert)
 
         # New recordings from the feed: score them, then redraw at most a few times a second.
         self._redraw = QTimer(self)
@@ -1139,10 +1206,16 @@ class MissionWindow(QMainWindow):
             feed.status.connect(self.home.set_status)
             feed.finished.connect(lambda n: self.home.set_status(f"Up to date · {n} recordings checked just now"))
 
-        screens = {"launcher": self.launcher, "intro": self.intro, "home": self.home}
+        self.stack.currentChanged.connect(self._fade)
+        screens = {"launcher": self.launcher, "intro": self.intro, "home": self.home, "ai": self.ai}
         self.stack.setCurrentWidget(screens.get(start, self.launcher))
 
     # ------------------------------------------------------------------
+    def _fade(self, index: int) -> None:
+        widget = self.stack.widget(index)
+        if widget in (self.launcher, self.intro, self.home, self.ai):
+            fade_in(widget)
+
     def open_live(self) -> None:
         self.stack.setCurrentWidget(self.home if self._seen_intro else self.intro)
         self._seen_intro = True

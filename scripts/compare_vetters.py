@@ -109,6 +109,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epochs", type=int, default=30, help="most passes for the CNN (it stops early)")
     parser.add_argument("--limit", type=int, default=0, help="use only this many recordings (a quick trial)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--out", default=str(ROOT / "outputs" / "vetting"),
+                        help="folder for the results (the app keeps its own runs apart from the report's)")
+    parser.add_argument("--name", default="model_comparison", help="file name for the results, without extension")
     args = parser.parse_args(argv)
     from sklearn.model_selection import GroupKFold
 
@@ -166,13 +169,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{LABELS[name]:38}{r['accuracy']:>9.3f}{r['balanced_accuracy']:>10.3f}{r['auroc']:>8.3f}"
               f"{r['ece']:>7.3f}{r['decide_alone_5pc']:>10.1%}{r['decide_alone_10pc']:>11.1%}{seconds[name]:>9.0f}")
 
-    out = ROOT / "outputs" / "vetting"
+    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     clean = {name: {k: v for k, v in r.items() if not k.startswith("_")} | {"train_seconds": seconds[name]}
              for name, r in results.items()}
-    (out / "model_comparison.json").write_text(json.dumps({
+    # Each model's risk-coverage curve, thinned to 60 points, so the app can draw it.
+    curves = {}
+    for name, r in results.items():
+        curve = r["_curve"]
+        keep = np.unique(np.linspace(0, len(curve.coverage) - 1, 60).astype(int))
+        curves[name] = {"coverage": [round(float(v), 4) for v in np.asarray(curve.coverage)[keep]],
+                        "risk": [round(float(v), 4) for v in np.asarray(curve.risk)[keep]]}
+    (out / f"{args.name}.json").write_text(json.dumps({
         "n": int(len(y)), "stations": int(len(set(groups.tolist()))), "folds": args.folds,
-        "epochs": args.epochs, "limit": args.limit, "results": clean}, indent=2), encoding="utf-8")
+        "epochs": args.epochs, "limit": args.limit, "seed": args.seed,
+        "finished": time.strftime("%Y-%m-%d %H:%M"), "results": clean, "curves": curves}, indent=2),
+        encoding="utf-8")
 
     fig, (left, right) = plt.subplots(1, 2, figsize=(12, 4.8))
     names = list(args.models)
@@ -192,8 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     fig.suptitle(f"{len(y):,} volunteer-checked SatNOGS recordings, {args.folds} folds, whole stations held out",
                  fontsize=11)
     fig.tight_layout()
-    fig.savefig(out / "model_comparison.png", dpi=130)
-    print(f"\nSaved {out / 'model_comparison.json'} and {out / 'model_comparison.png'}  ({time.time() - started:.0f} s)")
+    fig.savefig(out / f"{args.name}.png", dpi=130)
+    plt.close(fig)
+    print(f"\nSaved {out / (args.name + '.json')} and {out / (args.name + '.png')}  ({time.time() - started:.0f} s)",
+          flush=True)
     return 0
 
 

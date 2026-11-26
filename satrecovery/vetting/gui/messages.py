@@ -137,7 +137,7 @@ class MessagesPanel(QWidget):
             return
         r = self._rows[row]
         dim, mono = theme.DIM, theme.MONO
-        lines = [f"<span style='color:{theme.ACCENT}; font-size:13px'><b>{r['kind']}</b></span>"]
+        lines = [f"<span style='color:{theme.ACCENT}; font-size:15px'><b>{r['kind']}</b></span>"]
         if r["source"]:
             route = " → ".join([r["source"]] + r["repeaters"] + [r["destination"]])
             lines.append(f"<span style='color:{dim}'>from → to</span>&nbsp; <b>{route}</b>")
@@ -148,10 +148,10 @@ class MessagesPanel(QWidget):
                          f"<span style='font-family:\"{mono}\"'>{_escape(r['text'][:160])}</span>")
         bits = " ".join(r["bits"][i:i + 8] for i in range(0, len(r["bits"]), 8))
         lines.append(f"<span style='color:{dim}'>first bits</span><br><span style='font-family:\"{mono}\"; "
-                     f"font-size:10px; color:{theme.SIGNAL}'>{bits}</span>")
+                     f"font-size:12px; color:{theme.SIGNAL}'>{bits}</span>")
         hex_block = "<br>".join(_escape(line) for line in r["hex"])
         lines.append(f"<span style='color:{dim}'>bytes</span><br><span style='font-family:\"{mono}\"; "
-                     f"font-size:10px'>{hex_block}</span>")
+                     f"font-size:12px'>{hex_block}</span>")
         self.detail.setText("<br>".join(lines))
 
 

@@ -4,8 +4,11 @@ Built from the Phase 8 parts -- the logo, the animated tabs, the loading
 bar, the toasts, the theme -- imported, not copied.
 
 The header holds the app's name and the things that apply everywhere:
-the dataset, the Dark and Animations switches, and the "?" guide.  The
-tabs sit in their own row beneath it, so all seven fit on a laptop screen.
+the Dark and Animations switches and the "?" guide.  The tabs sit in
+their own row beneath it.
+
+No dataset is needed: the AI was trained on RML24 once, and every tab
+works on signals the user gives it (simulated, or from a file).
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget
 
 from ...gui import theme
 from ...gui.motion import AnimatedTabs, LoadingBar, Motion, PillButton, ToastHost, ToggleSwitch
@@ -24,7 +27,7 @@ from .batch import BatchPage
 from .client import AnalysisClient
 from .help import HelpDialog
 from .history import HistoryPage
-from .pages import AnalysisPage, FilePage, RealSignalPage, SimulatedSignalPage
+from .pages import AnalysisPage, FilePage, SimulatedSignalPage
 from .compare import ComparePage
 from .report import ReportPage
 
@@ -45,15 +48,13 @@ class AnalysisWindow(QMainWindow):
         self._client = client
         self.preferences = preferences or Preferences()
 
-        self.real = RealSignalPage(client)
         self.simulated = SimulatedSignalPage(client)
         self.file = FilePage(client)
         self.history = HistoryPage(client)
         self.batch = BatchPage(client)
         self.report = ReportPage(client)
         self.compare = ComparePage(client)
-        self.pages: list[Page] = [self.real, self.simulated, self.file, self.history, self.batch, self.report,
-                                  self.compare]
+        self.pages: list[Page] = [self.simulated, self.file, self.history, self.batch, self.report, self.compare]
 
         self.tabs = AnimatedTabs()
         for page in self.pages:
@@ -75,9 +76,6 @@ class AnalysisWindow(QMainWindow):
         text.setSpacing(0)
         text.addWidget(name)
         text.addWidget(tagline)
-        self.dataset_button = PillButton("Dataset: checking…", "secondary")
-        self.dataset_button.setToolTip("Choose the RML24 folder. The app remembers it for next time.")
-        self.dataset_button.clicked.connect(self.choose_dataset)
         self.dark_switch = ToggleSwitch("Dark")
         self.dark_switch.setChecked(theme.DARK)
         self.dark_switch.toggled.connect(self._dark_toggled)
@@ -98,8 +96,6 @@ class AnalysisWindow(QMainWindow):
         row.addWidget(Logo())
         row.addLayout(text)
         row.addStretch(1)
-        row.addWidget(self.dataset_button)
-        row.addSpacing(6)
         row.addWidget(self.dark_switch)
         row.addWidget(self.motion_switch)
         row.addWidget(self.help_button)
@@ -128,45 +124,9 @@ class AnalysisWindow(QMainWindow):
         self.toasts = ToastHost(self)
         self.statusBar().setSizeGripEnabled(False)
 
-        self.report.open_row.connect(self._open_mistake)
+        self.report.open_signal.connect(self._open_mistake)
         self.history.open_entry.connect(self.open_history_entry)
-        self.real.choose_dataset.connect(self.choose_dataset)
-        self.real.ensure_loaded()
-        self.real.tasks.run(client.analysis_status, self._show_dataset, lambda _error: None)
-
-    # -- the dataset ------------------------------------------------------------
-    def _show_dataset(self, status: dict) -> None:
-        dataset = status.get("dataset", {})
-        if dataset.get("available"):
-            name = Path(dataset.get("path", "")).name or dataset.get("name", "RML24")
-            self.dataset_button.setText(f"Dataset: {name} ✓")
-        else:
-            self.dataset_button.setText("Choose dataset…")
-
-    def choose_dataset(self) -> None:
-        start = self.preferences.rml24_path or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "Choose the RML24_IQdata folder", start)
-        if folder:
-            self.use_dataset(folder)
-
-    def use_dataset(self, folder: str) -> None:
-        """Open ``folder`` as the dataset, and remember it if it works."""
-        self.dataset_button.setText("Dataset: opening…")
-
-        def opened(described: dict) -> None:
-            self.preferences.rml24_path = folder
-            self.toasts.show(f"Dataset opened: {described.get('recordings', 0):,} recordings. "
-                             "The app will open this folder next time.", "success")
-            self._show_dataset({"dataset": described})
-            for page in (self.real, self.batch):
-                if page.loaded:
-                    page.refresh()
-
-        def failed(error) -> None:
-            self.real.report_error(error)
-            self.real.tasks.run(self._client.analysis_status, self._show_dataset, lambda _e: None)
-
-        self.real.tasks.run(lambda: self._client.open_dataset(folder), opened, failed)
+        self.simulated.ensure_loaded()
 
     # -- history ------------------------------------------------------------------
     def open_history_entry(self, entry: int) -> None:
@@ -179,7 +139,8 @@ class AnalysisWindow(QMainWindow):
         if source.get("file"):
             return self.file                        # an RML24 recording that arrived in a file
         kind = source.get("kind")
-        return {"recorded": self.real, "simulated": self.simulated, "file": self.file}.get(kind, self.real)
+        # Older analyses of RML24 recordings reopen in the file tab: the dataset is no longer needed.
+        return {"simulated": self.simulated, "file": self.file}.get(kind, self.file)
 
     def _show_saved(self, result: dict) -> None:
         page = self.page_for(result)
@@ -187,11 +148,12 @@ class AnalysisWindow(QMainWindow):
         self.tabs.setCurrentWidget(page)
         page.show_saved(result)
 
-    def _open_mistake(self, row: int, snr: float) -> None:
-        """A mistake from the report card, opened in the Real signal tab."""
-        self.real.ensure_loaded()
-        self.tabs.setCurrentWidget(self.real)
-        self.real.open_row(row, snr)
+    def _open_mistake(self, signal: dict) -> None:
+        """A mistake from the report card: the very same simulated signal, opened in the Simulated tab."""
+        self.simulated.ensure_loaded()
+        self.tabs.setCurrentWidget(self.simulated)
+        self.simulated.open_simulated(signal["true"], signal["snr_label_db"], signal.get("symbol_rate", 250_000.0),
+                                      signal.get("seed"))
 
     # -- help and dark mode ---------------------------------------------------------
     def show_help(self) -> HelpDialog:

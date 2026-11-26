@@ -161,13 +161,13 @@ class TestFile:
     def summary(info: dict[str, Any]) -> str:
         """One or two plain sentences for the screen."""
         if info["kind"] == "simulated":
-            text = f"✓ Test file: answer key inside. Made by the simulator · {info['snr_db']:+.0f} dB"
+            text = f"Test file: answer key inside. Made by the simulator · {info['snr_db']:+.0f} dB"
             if info.get("freq_offset_hz"):
                 text += f" · {info['freq_offset_hz']:.0f} Hz Doppler"
             return text + "."
         text = f"Test file: real RML24 recording #{info['row']:,}."
         if info["answer_key"] == "phase3":
-            return "✓ " + text + " Answer key worked out by the Phase 3 decoder."
+            return text + " Answer key worked out by the Phase 3 decoder."
         return text + " True type inside; no answer key for the bits (too noisy to work them out)."
 
     @staticmethod

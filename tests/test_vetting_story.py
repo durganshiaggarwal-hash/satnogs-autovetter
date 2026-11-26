@@ -26,7 +26,7 @@ def explanation(source: str, name: str = "GEMINI-POLLUX", share: float = 0.9, no
 
 def test_ground_interference_is_not_heard_and_says_why():
     story = tell(item(0.5), explanation("ground", "Ground transmitter (fixed frequency)", norad=0), "ORESAT")
-    assert story.mark == "not heard" and story.symbol == "✖" and "ground" in story.sentence and story.dots == 5
+    assert story.mark == "not heard" and story.symbol == "x" and "ground" in story.sentence and story.dots == 5
 
 
 def test_another_satellite_is_named():

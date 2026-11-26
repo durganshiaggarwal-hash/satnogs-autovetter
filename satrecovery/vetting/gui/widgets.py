@@ -123,7 +123,7 @@ class ProbabilityDelegate(QStyledItemDelegate):
             painter.drawLine(int(x), int(bar.top() - 3), int(x), int(bar.bottom() + 3))
         painter.setPen(QColor(theme.TEXT))
         font = QFont(theme.MONO)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         painter.drawText(QRectF(bar.right() + 4, rect.top(), 30, rect.height()),
                          Qt.AlignVCenter | Qt.AlignLeft, f"{item.probability:.2f}")
@@ -290,7 +290,7 @@ class Meter(QWidget):
         painter.drawRect(QRectF(x - 2, y - 5, 4, 16))
         painter.setPen(QColor(theme.DIM))
         font = QFont(theme.MONO)
-        font.setPixelSize(9)
+        font.setPixelSize(11)
         painter.setFont(font)
         # zone names below the bar, threshold values above it: they never collide
         painter.drawText(QRectF(1, y + 12, 80, 12), Qt.AlignLeft, "NO SIGNAL")
@@ -317,7 +317,7 @@ class Reasons(QWidget):
             colour = theme.SIGNAL if toward_signal else theme.NO_SIGNAL
             label = QLabel(f"<span style='color:{colour}; font-family:\"{theme.MONO}\"'>{'+' if toward_signal else '−'}</span>"
                            f"&nbsp; {title}<br><span style='color:{theme.DIM}; font-family:\"{theme.MONO}\"; "
-                           f"font-size:10px'>&nbsp;&nbsp;&nbsp;{detail}</span>")
+                           f"font-size:11px'>&nbsp;&nbsp;&nbsp;{detail}</span>")
             label.setTextFormat(Qt.RichText)
             label.setWordWrap(True)
             self._layout.addWidget(label)

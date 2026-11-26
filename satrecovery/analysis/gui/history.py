@@ -110,7 +110,7 @@ class HistoryPage(Page):
             when = datetime.fromtimestamp(entry["saved_at"]).strftime("%d %b, %H:%M")
             verdict = entry["verdict"]
             cells = [when, entry["source"], entry["ai_label"], f"{entry['confidence']:.0%}",
-                     "✓ right" if verdict == "right" else ("✕ " + verdict if verdict.startswith("wrong") else "unknown"),
+                     "right" if verdict == "right" else (verdict if verdict.startswith("wrong") else "unknown"),
                      entry["bits"]]
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)

@@ -210,5 +210,5 @@ class TestScreens:
 
         window = AnalysisWindow(AnalysisClient("http://127.0.0.1:9"), Preferences(tmp_path / "p.json"))
         assert window.page_for({"input": {"kind": "recorded", "file": "test_RML24.npz"}}) is window.file
-        assert window.page_for({"input": {"kind": "recorded"}}) is window.real
+        assert window.page_for({"input": {"kind": "recorded"}}) is window.file   # no Real signal tab any more
         window.close()

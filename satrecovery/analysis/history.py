@@ -87,7 +87,7 @@ class AnalysisHistory:
         bits = (f"{check['bit_errors']:,} of {check['n_bits']:,} wrong" if check.get("available")
                 else "not checked")
         level = result.get("trust", {}).get("level")
-        label = c["label"] + (f" (⚠ {level})" if level in ("unsure", "unfamiliar") else "")
+        label = c["label"] + (f" ({level})" if level in ("unsure", "unfamiliar") else "")
         return {"kind": kind, "source": text, "ai_label": label, "confidence": float(c["confidence"]),
                 "verdict": verdict, "bits": bits}
 

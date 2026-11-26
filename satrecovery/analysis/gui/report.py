@@ -1,15 +1,15 @@
 """The AI's report card: how good is the classifier, and where does it fail?
 
 A classifier that only ever shows its successes proves nothing.  This
-tab tests it on RML24 recordings it never saw in training -- the last
-recordings of every group, which the training script keeps aside -- and
-shows three things:
+tab tests the RML24-trained classifier on freshly simulated signals --
+made the way RML24 was made, at every one of its signal qualities and
+speeds, so no dataset is needed -- and shows three things:
 
 * **accuracy at every signal quality**, from hopeless to perfectly clean;
 * **which types it mixes up**, as a confusion matrix;
 * **every mistake**, worst-first (mistakes on clean signals are the
-  interesting ones).  Double-click one to open that very recording in
-  the Real signal tab and watch the AI get it wrong.
+  interesting ones).  Double-click one to make that very signal again in
+  the Simulated signal tab and watch the AI get it wrong.
 """
 
 from __future__ import annotations
@@ -92,25 +92,27 @@ class ConfusionMatrix(QWidget):
 
 
 class ReportPage(Page):
-    """How good is the AI?  Tested on recordings it never trained on."""
+    """How good is the AI?  The RML24-trained AI, tested on freshly simulated signals."""
 
-    #: Emitted when a mistake is double-clicked: (row, SNR label).
-    open_row = Signal(int, float)
+    #: Emitted when a mistake is double-clicked: the signal's type, quality, speed and seed.
+    open_signal = Signal(dict)
 
     def __init__(self, client, parent: QWidget | None = None) -> None:
         super().__init__(client, parent)
         self._result: dict | None = None
+        self._rml24_accuracy: float | None = None
 
         # -- left: the test, and the headline numbers ------------------
         box, form = card(
             "Test the AI",
-            "Runs the classifier on RML24 recordings it never saw in training, at every signal "
-            "quality, and shows where it goes wrong.")
-        form.addWidget(QLabel("Recordings per group"))
+            "The AI was trained on RML24. Here it names brand-new simulated signals of all six types, made "
+            "the way RML24 was made, at every one of RML24's 21 signal qualities and 3 speeds.")
+        form.addWidget(QLabel("Signals per group"))
         self.per_group = QSpinBox()
-        self.per_group.setRange(1, 40)
-        self.per_group.setValue(6)
-        self.per_group.setToolTip("A group is one type x one signal quality x one speed: 378 groups in all.")
+        self.per_group.setRange(1, 20)
+        self.per_group.setValue(3)
+        self.per_group.setToolTip("A group is one type x one signal quality x one speed: 378 groups in all. "
+                                  "3 per group is 1,134 signals, about half a minute.")
         form.addWidget(self.per_group)
         self.run_button = PillButton("Run the test", "primary")
         self.run_button.clicked.connect(self.run)
@@ -174,16 +176,16 @@ class ReportPage(Page):
         matrix_layout.addWidget(self.weakest)
 
         table_card, table_layout = card("Only the mistakes, cleanest signals first",
-                                        "This list shows ONLY the recordings the AI got wrong, so the two "
+                                        "This list shows ONLY the signals the AI got wrong, so the two "
                                         "columns never match -- that is what makes them mistakes. The ones it "
-                                        "got right are not listed. Double-click one to open it in the Real "
-                                        "signal tab.")
+                                        "got right are not listed. Double-click one to make that exact "
+                                        "signal again in the Simulated signal tab.")
         self.table_summary = QLabel("")
         self.table_summary.setWordWrap(True)
         self.table_summary.setStyleSheet(f"font-family: '{theme.SANS_SEMIBOLD}';")
         table_layout.addWidget(self.table_summary)
         self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["Recording", "Quality", "Really was", "AI said", "How sure", "Warned?"])
+        self.table.setHorizontalHeaderLabels(["Signal", "Quality", "Really was", "AI said", "How sure", "Warned?"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -214,8 +216,8 @@ class ReportPage(Page):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 18, 14, 10)
         layout.setSpacing(10)
-        layout.addWidget(self.heading(self.title, "Where the AI is right, where it fails, and why — on recordings "
-                                                  "it never saw while training."))
+        layout.addWidget(self.heading(self.title, "Where the AI is right, where it fails, and why — on signals "
+                                                  "it has never seen."))
         layout.addLayout(body, 1)
 
     @property
@@ -223,13 +225,18 @@ class ReportPage(Page):
         return "How good is the AI?"
 
     def refresh(self) -> None:
-        """Nothing to load until the test is run."""
+        """Only the model's own RML24 score, for comparison; the test runs on request."""
+        self.tasks.run(self.client.analysis_status, self._got_status, lambda _error: None)
+
+    def _got_status(self, status: dict) -> None:
+        self._rml24_accuracy = (status.get("classifier") or {}).get("test_accuracy")
 
     def run(self) -> None:
         per_group = int(self.per_group.value())
         self.run_button.setEnabled(False)
-        self.status.setText(f"Testing on {per_group * 378:,} held-out recordings…")
-        self.tasks.run(lambda: self.client.evaluate_classifier(per_group), self._show, self._failed)
+        self.status.setText(f"Making and testing {per_group * 378:,} simulated signals… "
+                            f"(about {max(per_group * 10, 10)} s)")
+        self.tasks.run(lambda: self.client.evaluate_simulated(per_group), self._show, self._failed)
 
     def _failed(self, error) -> None:
         self.run_button.setEnabled(True)
@@ -239,12 +246,15 @@ class ReportPage(Page):
     def _show(self, result: dict) -> None:
         self._result = result
         self.run_button.setEnabled(True)
-        self.status.setText(f"Tested on {result['n']:,} recordings the AI never trained on.")
+        self.status.setText(f"Tested on {result['n']:,} simulated signals the AI had never seen.")
         self.overall.set_value(100 * result["accuracy"])
         if result.get("accuracy_10db_up") is not None:
             self.clean.set_value(100 * result["accuracy_10db_up"])
-        self.mistakes_count.setText(f"{result['n_mistakes']:,} mistakes in all. Most are on very noisy "
-                                    "signals, where nobody could tell.")
+        text = (f"{result['n_mistakes']:,} mistakes in all. Most are on very noisy signals, where nobody "
+                "could tell.")
+        if self._rml24_accuracy is not None:
+            text += f" For comparison, on real RML24 test recordings it scored {100 * self._rml24_accuracy:.1f}%."
+        self.mistakes_count.setText(text)
 
         self.curve.clear()
         xs = [row["snr_db"] for row in result["by_snr"]]
@@ -279,7 +289,7 @@ class ReportPage(Page):
             self.warning_score.setText(text)
         right_count = result["n"] - result["n_mistakes"]
         self.table_summary.setText(
-            f"Tested {result['n']:,} recordings: {right_count:,} named correctly (not listed), "
+            f"Tested {result['n']:,} signals: {right_count:,} named correctly (not listed), "
             f"{result['n_mistakes']:,} mistakes (listed below"
             + (f", the first {len(result['mistakes'])}" if len(result["mistakes"]) < result["n_mistakes"] else "")
             + ").")
@@ -290,10 +300,10 @@ class ReportPage(Page):
             warned = mistake.get("warning")
             cells = [f"#{mistake['row']:,}", f"{mistake['snr_label_db']:+.0f} dB", mistake["true"],
                      mistake["predicted"], f"{mistake['confidence']:.0%}",
-                     ("⚠ " + warned) if warned in ("unsure", "unfamiliar") else ("no" if warned else "")]
+                     ("flagged: " + warned) if warned in ("unsure", "unfamiliar") else ("no" if warned else "")]
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                item.setData(Qt.UserRole, (mistake["row"], mistake["snr_label_db"]))
+                item.setData(Qt.UserRole, dict(mistake))
                 if column == 3:
                     item.setForeground(QColor(theme.CRITICAL))
                 self.table.setItem(row, column, item)
@@ -303,8 +313,7 @@ class ReportPage(Page):
     def _open(self, row: int, _column: int) -> None:
         item = self.table.item(row, 0)
         if item is not None:
-            recording, snr = item.data(Qt.UserRole)
-            self.open_row.emit(int(recording), float(snr))
+            self.open_signal.emit(dict(item.data(Qt.UserRole)))
 
 
 __all__ = ["ConfusionMatrix", "ReportPage"]

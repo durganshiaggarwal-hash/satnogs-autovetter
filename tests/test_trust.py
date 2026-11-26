@@ -86,7 +86,7 @@ class TestWhereItShows:
         noisy = Analyser(Oracle("QPSK"), catalog).analyse(_signal(-10.0))
         assert clean["trust"]["level"] == "confident" and noisy["trust"]["level"] == "unfamiliar"
         assert AnalysisHistory.summarise(clean)["ai_label"] == "QPSK"
-        assert AnalysisHistory.summarise(noisy)["ai_label"] == "QPSK (⚠ unfamiliar)"
+        assert AnalysisHistory.summarise(noisy)["ai_label"] == "QPSK (unfamiliar)"
 
     def test_the_report_card_measures_the_warning(self, tmp_path, archive_file):
         pytest.importorskip("fastapi")

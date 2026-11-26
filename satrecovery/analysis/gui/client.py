@@ -30,6 +30,15 @@ class AnalysisClient(HttpBackendClient):
     def evaluate_classifier(self, per_group: int = 6, seed: int = 0) -> dict:
         return self._request("POST", "/api/analysis/evaluate", {"per_group": int(per_group), "seed": int(seed)})
 
+    def evaluate_simulated(self, per_group: int = 3, seed: int = 0) -> dict:
+        return self._request("POST", "/api/analysis/evaluate-simulated", {"per_group": int(per_group), "seed": int(seed)})
+
+    def model_card(self) -> dict:
+        return self._request("GET", "/api/analysis/model-card")
+
+    def simulated_quick(self, body: dict) -> dict:
+        return self._request("POST", "/api/analysis/simulated-quick", body)
+
     def analyse_simulated(self, body: dict) -> dict:
         return self._request("POST", "/api/analysis/simulated", body)
 

@@ -92,15 +92,15 @@ class SkyPlot(QWidget):
         radius = side / 2
         if self.filled:   # as an inset over a map: a dark disc so the chart stays readable
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(6, 10, 16, 225))
-            painter.drawEllipse(centre, radius + 14, radius + 14)
+            painter.setBrush(QColor(46, 46, 46, 235))
+            painter.drawEllipse(centre, radius + 10, radius + 10)
             painter.setBrush(Qt.NoBrush)
         painter.setPen(QPen(QColor(theme.RULE), 1))
         for el in (0, 30, 60):
             r = radius * (1 - el / 90)
             painter.drawEllipse(centre, r, r)
         font = QFont(theme.MONO)
-        font.setPixelSize(9)
+        font.setPixelSize(11)
         painter.setFont(font)
         painter.setPen(QColor(theme.DIM))
         for label, az in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):

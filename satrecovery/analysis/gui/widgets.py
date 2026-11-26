@@ -142,8 +142,7 @@ class ClassifierCard(QFrame):
         if not trust:
             self.trust.setVisible(False)
             return
-        mark = {"confident": "✓", "unsure": "⚠", "unfamiliar": "⚠"}.get(trust["level"], "")
-        text = f"{mark}  {trust['title']}"
+        text = trust["title"]
         if trust.get("reasons"):
             text += "\n" + "\n".join(f"•  {reason}" for reason in trust["reasons"])
         fill, ink = self._trust_colours(trust["level"])
@@ -169,10 +168,10 @@ class ClassifierCard(QFrame):
                                  "right or wrong.")
             self.verdict.setStyleSheet(f"color: {theme.INK_2}; font-family: 'Manrope SemiBold';")
         elif classification.get("correct"):
-            self.verdict.setText(f"✓  Right: it really is {classification['true_label']}.")
+            self.verdict.setText(f"Right: it really is {classification['true_label']}.")
             self.verdict.setStyleSheet(f"color: {theme.GOOD}; font-family: 'Manrope SemiBold';")
         else:
-            self.verdict.setText(f"✕  Wrong: it is really {classification['true_label']}.")
+            self.verdict.setText(f"Wrong: it is really {classification['true_label']}.")
             self.verdict.setStyleSheet(f"color: {theme.CRITICAL}; font-family: 'Manrope SemiBold';")
         fade_in(self.verdict)
 
@@ -560,8 +559,7 @@ class BitsCard(QFrame):
         if check.get("available"):
             errors, total = check["bit_errors"], check["n_bits"]
             good = errors == 0
-            mark = "✓" if good else "✕"
-            self.check.setText(f"{mark}  Checked: {errors:,} of {total:,} bits wrong ({100 * errors / max(total, 1):.2f}%)")
+            self.check.setText(f"Checked: {errors:,} of {total:,} bits wrong ({100 * errors / max(total, 1):.2f}%)")
             self.check.setStyleSheet(f"color: {theme.GOOD if good else theme.CRITICAL};"
                                      f" font-family: '{theme.SANS_SEMIBOLD}'; font-size: 12pt;")
         else:

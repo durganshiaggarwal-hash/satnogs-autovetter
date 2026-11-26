@@ -75,12 +75,21 @@ PAGE_ACCENTS = {
 
 def page_accent(title: str) -> str:
     """The tab's strong colour, for text and small marks."""
+    if DARK:
+        return BRAND_DEEP          # one accent for every tab in the dark look
     return PAGE_ACCENTS.get(title, (BLUSH, MAUVE))[1]
 
 
 def page_fill(title: str) -> str:
     """The tab's soft colour, for its pill and highlights."""
+    if DARK:
+        return "#6D8196"           # the chosen tab is a slate tile
     return PAGE_ACCENTS.get(title, (BLUSH, MAUVE))[0]
+
+
+def corner(height: float) -> float:
+    """Corner radius of pills and tabs: round in the light look, square in the dark one."""
+    return 0.0 if DARK else height / 2
 
 
 # ----------------------------------------------------------------------
@@ -133,15 +142,15 @@ _LIGHT_VALUES: dict[str, object] = {}
 #: so every pairing used in the light look (light text on soft fills
 #: becomes light text on deep fills) stays readable.
 _DARK_VALUES: dict[str, object] = {
-    # Retuned (November 2026) to match the Live satellites half of the app,
-    # so the two halves read as one product: near-black surfaces, one teal
-    # accent, the same green and coral.  Hue roles are unchanged: the
-    # "brand" fills are deep teal, the one strong colour is bright teal.
-    "PEACH": "#1d4f59", "BLUSH": "#22616d", "SAND": "#1b4a54", "MAUVE": "#56c8d8", "SAGE": "#2f5a44",
-    "BG": "#0d1015", "SURFACE": "#12161c", "SUNK": "#181d25", "LINE": "#232a34", "LINE_SOFT": "#1a2029",
-    "INK": "#e9eef4", "INK_2": "#9aa5b4", "INK_3": "#6b7584", "FOCUS": "#56c8d8",
-    "BRAND_DEEP": "#56c8d8", "BRAND_SOFT": ("#13262c", "#14292f", "#122328"),
-    "CRITICAL": "#f07a5f", "GOOD": "#5fd68e", "RAW": "#8792a2",
+    # Retuned (November 2026) to the "Ink wash" palette shared with the Live
+    # satellites half: #4A4A4A ink, #CBCBCB grey, #FFFFE3 cream, #6D8196 slate.
+    # Flat and square.  Hue roles are unchanged: the "brand" fills are slate.
+    "PEACH": "#6d8196", "BLUSH": "#6d8196", "SAND": "#5b6d80", "MAUVE": "#a9bccf", "SAGE": "#5f7a55",
+    "BG": "#2e2e2e", "SURFACE": "#4a4a4a", "SUNK": "#3c3c3c", "LINE": "#5c5c5c", "LINE_SOFT": "#444444",
+    "INK": "#ffffe3", "INK_2": "#cbcbcb", "INK_3": "#9a9a9a", "FOCUS": "#a9bccf",
+    "BRAND_DEEP": "#a9bccf", "BRAND_SOFT": ("#3d4650", "#414b56", "#39424c"),
+    "CRITICAL": "#ee8a76", "GOOD": "#bfe08f", "RAW": "#b0b0b0",
+    "RADIUS_CARD": 0, "RADIUS_CONTROL": 0, "BASE_PT": 12,
 }
 
 
@@ -160,7 +169,7 @@ def use_dark(on: bool) -> None:
         module[name] = value
     DARK = bool(on)
     BRAND = (module["PEACH"], module["BLUSH"], module["SAND"])
-    ON_BRAND = module["INK"]
+    ON_BRAND = module["INK"]   # cream text on the slate fill
     OTHER = module["INK_3"]
 
 
@@ -326,7 +335,26 @@ def stylesheet() -> str:
     QToolTip {{
         background: {INK}; color: {SURFACE}; border: none; padding: 6px 10px; border-radius: 6px;
     }}
-    """
+    """ + (_DARK_EXTRA.format(ink=INK, accent=BRAND_DEEP, line=LINE, sunk=SUNK, mono=MONO,
+                              bold=SANS_EXTRABOLD, semibold=SANS_SEMIBOLD) if DARK else "")
+
+
+#: Headings and dividers in the dark look: cream bold headings with wide
+#: letter-spacing, slate section titles, thin grey rules.
+_DARK_EXTRA = """
+    QLabel#PageTitle {{ font-family: "{bold}"; font-size: 24pt; letter-spacing: 4px; color: {ink}; }}
+    QLabel#CardTitle {{ font-family: "{semibold}"; font-size: 14pt; letter-spacing: 1.5px; color: {accent}; }}
+    QLabel#BigNumber {{ font-size: 28pt; letter-spacing: 1px; }}
+    QLabel#Muted {{ font-size: 11pt; }}
+    QLabel#Readout, QLabel#ReadoutChip {{ font-size: 11pt; }}
+    QLabel#Badge {{ font-size: 11pt; }}
+    QStatusBar QLabel {{ font-size: 11pt; }}
+    QHeaderView::section {{ color: {accent}; letter-spacing: 1px; font-size: 11pt; }}
+    QFrame#Card, QFrame#CardTinted {{ border: 1px solid {line}; }}
+    QToolTip {{ background: {sunk}; color: {ink}; border: 1px solid {line}; border-radius: 0; }}
+    QLabel#ReadoutChip {{ border-radius: 0; }}
+    QLabel#Badge {{ border-radius: 0; }}
+"""
 
 
 def configure_plots() -> None:

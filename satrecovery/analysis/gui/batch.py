@@ -1,16 +1,18 @@
-"""The "Many at once" tab: analyse a whole group of recordings in one go.
+"""The "Many at once" tab: analyse a whole group of simulated signals in one go.
 
-Pick a type, a quality, a speed and how many; the app analyses them one
-after another, keeps a running score, and ends with one summary and a
-table that can be saved for Excel (CSV).
+Pick a type, a quality, a speed and how many; the app makes that many
+fresh signals (the way RML24 was made), lets the RML24-trained AI name
+each one, keeps a running score, and ends with one summary and a table
+that can be saved for Excel (CSV).  No dataset is needed.
 
-One recording at a time, each as its own background call, so the
+One signal at a time, each as its own background call, so the
 progress bar moves, the window never freezes, and Stop works at once.
 """
 
 from __future__ import annotations
 
 import csv
+import random
 from datetime import datetime
 from pathlib import Path
 
@@ -91,39 +93,41 @@ class BatchSummary:
 
 
 class BatchPage(Page):
-    """Analyse many recordings, one after another, and sum them up."""
+    """Analyse many simulated signals, one after another, and sum them up."""
 
     def __init__(self, client, parent: QWidget | None = None) -> None:
         super().__init__(client, parent)
-        self._queue: list[int] = []
+        self._queue: list[dict] = []
+        self._classes: list[str] = []
         self._running = False
         self.summary = BatchSummary()
 
         # -- left: what to analyse -------------------------------------------
-        box, form = card("Analyse many at once", "Choose a group of real RML24 recordings, then press Start.")
+        box, form = card("Analyse many at once", "Choose what kind of signals to make, then press Start.")
         self.kind = QComboBox()
         self.quality = QComboBox()
-        self.quality.addItem("Any quality", None)
-        for snr in range(20, -21, -2):
+        self.quality.addItem("Any quality (mixed)", None)
+        for snr in range(20, -21, -2):                      # RML24's 21 signal qualities
             self.quality.addItem(f"{snr:+d} dB", float(snr))
         self.quality.setCurrentIndex(self.quality.findData(16.0))
         self.rate = QComboBox()
-        self.rate.addItem("Any speed", None)
+        self.rate.addItem("Any speed (mixed)", None)
         for rate in (100_000, 250_000, 500_000):
             self.rate.addItem(f"{rate // 1000} kbaud", float(rate))
         self.rate.setCurrentIndex(self.rate.findData(250_000.0))
         self.how_many = QSpinBox()
-        self.how_many.setRange(5, 1000)
+        self.how_many.setRange(5, 500)
         self.how_many.setValue(50)
         self.how_many.setSingleStep(10)
         for label, widget in (("Signal type", self.kind), ("Signal quality", self.quality),
-                              ("Speed", self.rate), ("How many recordings", self.how_many)):
+                              ("Speed", self.rate), ("How many signals", self.how_many)):
             form.addWidget(QLabel(label))
             form.addWidget(widget)
         self.start_button = PillButton("Start", "primary")
         self.start_button.clicked.connect(self.toggle)
         form.addWidget(self.start_button)
-        note = QLabel("Each recording takes about a second. Results here are not added to History.")
+        note = QLabel("Every signal is new, made by the simulator; the AI was trained on RML24. "
+                      "Results here are not added to History.")
         note.setObjectName("Muted")
         note.setWordWrap(True)
         form.addWidget(note)
@@ -148,10 +152,10 @@ class BatchPage(Page):
         numbers.setSpacing(theme.GAP)
         self.ai_number = self._number(numbers, "AI named correctly")
         self.bits_number = self._number(numbers, "Bits wrong, where checked")
-        self.unchecked_number = self._number(numbers, "Recordings not checkable")
-        self.warned_number = self._number(numbers, "Answers flagged ⚠")
+        self.unchecked_number = self._number(numbers, "Signals not checkable")
+        self.warned_number = self._number(numbers, "Answers flagged")
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["Recording", "Quality", "Speed", "Really", "AI said", "How sure", "Bits"])
+        self.table.setHorizontalHeaderLabels(["Signal", "Quality", "Speed", "Really", "AI said", "How sure", "Bits"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -173,7 +177,7 @@ class BatchPage(Page):
         page = QVBoxLayout(self)
         page.setContentsMargins(28, 18, 14, 10)
         page.setSpacing(10)
-        page.addWidget(self.heading(self.title, "Test a whole group of real recordings and get one summary."))
+        page.addWidget(self.heading(self.title, "Test a whole group of new signals and get one summary."))
         page.addLayout(top, 1)
 
     @staticmethod
@@ -200,18 +204,16 @@ class BatchPage(Page):
         self.tasks.run(self.client.analysis_status, self._on_status, self.report_error)
 
     def _on_status(self, status: dict) -> None:
-        dataset = status["dataset"]
+        self._classes = list(status["classifier"]["classes"])
         if self.kind.count() == 0:
-            self.kind.addItem("Any type", None)
-            for name in status["classifier"]["classes"]:
+            self.kind.addItem("Any type (mixed)", None)
+            for name in self._classes:
                 self.kind.addItem(name, name)
-            self.kind.setCurrentIndex(max(self.kind.findData("8PSK"), 0))
-        ready = bool(dataset.get("available")) and bool(status["classifier"]["available"])
+            self.kind.setCurrentIndex(0)
+        ready = bool(status["classifier"]["available"])
         self.start_button.setEnabled(ready)
-        if not dataset.get("available"):
-            self.status.setText("Choose the RML24 dataset first (Dataset, at the top right).")
-        elif not status["classifier"]["available"]:
-            self.status.setText("Train the AI first: python scripts/train_classifier.py <path to RML24>")
+        if not ready:
+            self.status.setText("The AI classifier is missing (satrecovery_data/models/classifier.pt).")
 
     # -- running -------------------------------------------------------------
     def toggle(self) -> None:
@@ -229,18 +231,23 @@ class BatchPage(Page):
         self._running = True
         self.start_button.setText("Stop")
         self.save_button.setEnabled(False)
-        self.status.setText("Picking recordings…")
-        self.tasks.run(lambda: self.client.batch_rows(kind, quality, rate, count), self._got_rows, self._failed)
+        # The plan: what each signal will be.  "Mixed" picks at random for every signal.
+        rng = random.Random()
+        qualities = [float(q) for q in range(-20, 21, 2)]
+        plan = [{"modulation": kind or rng.choice(self._classes or ["QPSK"]),
+                 "symbol_rate": rate or rng.choice((100_000.0, 250_000.0, 500_000.0)),
+                 "conditions": {"snr_db": quality if quality is not None else rng.choice(qualities)},
+                 "seed": rng.randrange(2 ** 31)} for _ in range(count)]
+        self._got_rows(plan)
 
     def stop(self) -> None:
         self._queue = []
         self._finish(stopped=True)
 
-    def _got_rows(self, rows: list[int]) -> None:
+    def _got_rows(self, rows: list[dict]) -> None:
         if not self._running:
             return
         if not rows:
-            self.status.setText("No recordings match those choices.")
             self._finish()
             return
         self._queue = list(rows)
@@ -255,9 +262,9 @@ class BatchPage(Page):
         if not self._queue:
             self._finish()
             return
-        row = self._queue.pop(0)
-        self.status.setText(f"Analysing… {self.summary.n + 1} of {self._total}")
-        self.tasks.run(lambda: self.client.quick(row), self._got_one, self._failed_one)
+        body = self._queue.pop(0)
+        self.status.setText(f"Making and analysing… {self.summary.n + 1} of {self._total}")
+        self.tasks.run(lambda: self.client.simulated_quick(body), self._got_one, self._failed_one)
 
     def _got_one(self, result: dict) -> None:
         if not self._running:
@@ -282,7 +289,7 @@ class BatchPage(Page):
         self.save_button.setEnabled(self.summary.n > 0)
         if self.summary.n:
             word = "Stopped" if stopped else "Done"
-            self.status.setText(f"{word}: {self.summary.n} recordings analysed.")
+            self.status.setText(f"{word}: {self.summary.n} signals analysed.")
             if not stopped:
                 self.notify.emit(f"Many at once: {self.summary.correct} of {self.summary.n} named correctly.",
                                  "success")
@@ -301,7 +308,7 @@ class BatchPage(Page):
         bits = (f"{r['bit_errors']:,} of {r['n_bits']:,} wrong" if r.get("checked") else "not checked")
         cells = [f"#{r['row']:,}", f"{r['snr_label_db']:+.0f} dB" if r.get("snr_label_db") is not None else "",
                  f"{(r.get('symbol_rate') or 0) / 1000:.0f} kbaud", r.get("really") or "", r["ai_said"],
-                 f"{r['confidence']:.0%}" + ("  ⚠" if r.get("trust") in ("unsure", "unfamiliar") else ""), bits]
+                 f"{r['confidence']:.0%}" + ("  (flagged)" if r.get("trust") in ("unsure", "unfamiliar") else ""), bits]
         for column, text in enumerate(cells):
             item = QTableWidgetItem(text)
             if column == 4:

@@ -70,7 +70,7 @@ class SkyMap(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#05080d"))
+        painter.fillRect(self.rect(), QColor(theme.BG))
         cx, cy, R = self._geometry()
         if self._station is None or self._start is None:
             painter.setPen(QColor(theme.DIM))
@@ -109,7 +109,7 @@ class SkyMap(QWidget):
         WorldMap._subtitle(self, painter)
         painter.setPen(QColor(theme.FAINT))
         font = QFont(theme.SANS)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         local = f"Sun {sun_alt:+.0f}° · {state}"
         painter.drawText(QRectF(8, self.height() - 18, self.width() - 16, 14), Qt.AlignLeft,
@@ -124,7 +124,7 @@ class SkyMap(QWidget):
             r = R * math.tan(math.radians(90 - alt) / 2)
             painter.drawEllipse(QPointF(cx, cy), r, r)
         font = QFont(theme.MONO)
-        font.setPixelSize(9)
+        font.setPixelSize(11)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 60))
         for alt in (30, 60):
@@ -167,7 +167,7 @@ class SkyMap(QWidget):
         alt, az = altaz(ra, dec, lat, lon, when, gmst)
         x, y = self._xy(alt, az)
         font = QFont(theme.SANS)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         painter.setPen(QColor(150, 180, 220, 120))
         for name, a, xi, yi in zip(names, alt, x, y):
@@ -201,15 +201,15 @@ class SkyMap(QWidget):
         if up[now]:
             sx, sy = float(x[now]), float(y[now])
             halo = QRadialGradient(QPointF(sx, sy), 14 + 8 * self._pulse)
-            halo.setColorAt(0, QColor(86, 200, 216, 200))
-            halo.setColorAt(1, QColor(86, 200, 216, 0))
+            halo.setColorAt(0, QColor(*theme.ACCENT_RGB, 200))
+            halo.setColorAt(1, QColor(*theme.ACCENT_RGB, 0))
             painter.setPen(Qt.NoPen)
             painter.setBrush(halo)
             painter.drawEllipse(QPointF(sx, sy), 14 + 8 * self._pulse, 14 + 8 * self._pulse)
             WorldMap._satellite_icon(painter, sx, sy)
             painter.setPen(QColor(INK))
             font = QFont(theme.SANS)
-            font.setPixelSize(11)
+            font.setPixelSize(13)
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(QRectF(sx + 14, sy - 8, 220, 16), Qt.AlignLeft | Qt.AlignVCenter,
@@ -221,7 +221,7 @@ class SkyMap(QWidget):
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(QPointF(cx, cy), R, R)
         font = QFont(theme.MONO)
-        font.setPixelSize(12)
+        font.setPixelSize(14)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor(INK))

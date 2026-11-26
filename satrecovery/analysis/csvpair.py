@@ -172,7 +172,7 @@ class CsvTestFile:
         n = int(info["bits"].size)
         where = {"simulator": "made by the simulator", "phase3": "RML24 recording, Phase 3 answer key",
                  "none": "RML24 recording, true type only"}.get(info["answer_key"], "made by hand")
-        return (f"✓ Answer key found: {bits_name}\n{info['type']} · {info['speed_baud'] // 1000} kbaud · "
+        return (f"Answer key found: {bits_name}\n{info['type']} · {info['speed_baud'] // 1000} kbaud · "
                 f"{n:,} bits · {where}")
 
     @staticmethod

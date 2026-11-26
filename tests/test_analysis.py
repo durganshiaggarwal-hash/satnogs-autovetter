@@ -244,6 +244,25 @@ class TestApi:
             sim = c.post("/api/analysis/simulated", json={"modulation": "BPSK", "symbol_rate": 250000, "seed": 2})
             assert sim.status_code == 200 and sim.json()["input"]["kind"] == "simulated"
 
+    def test_without_the_dataset_the_ai_is_tested_on_simulated_signals(self, make_client):
+        with make_client(True) as c:
+            report = c.post("/api/analysis/evaluate-simulated", json={"per_group": 1, "seed": 3}).json()
+            # 6 types x 21 RML24 signal qualities x 3 speeds, one signal each
+            assert report["n"] == 6 * 21 * 3 and report["source"] == "simulated"
+            assert len(report["by_snr"]) == 21 and len(report["confusion"]["matrix"]) == 6
+            assert all({"seed", "symbol_rate", "true", "predicted"} <= set(m) for m in report["mistakes"])
+            body = {"modulation": "8PSK", "conditions": {"snr_db": 12}, "symbol_rate": 250000, "seed": 5}
+            one = c.post("/api/analysis/simulated-quick", json=body).json()
+            assert one["really"] == "8PSK" and one["seed"] == 5 and one["snr_label_db"] == 12
+            again = c.post("/api/analysis/simulated-quick", json=body).json()
+            assert again["ai_said"] == one["ai_said"]                      # the same seed makes the same signal
+            assert c.get("/api/analysis/history").json() == []              # quick answers are not kept
+
+    def test_the_model_card_reads_what_was_saved_with_the_model(self, make_client):
+        with make_client(True) as c:
+            card = c.get("/api/analysis/model-card").json()
+            assert card["classes"] and len(card["loss"]) == len(card["val_loss"])
+
     def test_bad_requests_are_refused(self, make_client):
         with make_client(True) as c:
             assert c.post("/api/analysis/recording", json={"row": -1}).status_code == 422
@@ -338,7 +357,7 @@ def test_changing_a_filter_picks_a_matching_recording(tmp_path, archive_file):
             time.sleep(0.01)
         assert page._row is not None and page._picked_modulation() == "8PSK"
         page.rate.setCurrentIndex(page.rate.findData(250_000.0))
-        marked = [page.quality.itemText(i) for i in range(page.quality.count()) if "✓" in page.quality.itemText(i)]
+        marked = [page.quality.itemText(i) for i in range(page.quality.count()) if "bits checked" in page.quality.itemText(i)]
         assert marked and all(int(t.split()[0]) >= 16 for t in marked)
 
 

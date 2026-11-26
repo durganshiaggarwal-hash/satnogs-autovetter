@@ -24,7 +24,7 @@ class Story:
 
     @property
     def symbol(self) -> str:
-        return {"heard": "✔", "not heard": "✖"}.get(self.mark, "?")
+        return {"heard": "+", "not heard": "x"}.get(self.mark, "?")
 
 
 def _short(name: str) -> str:

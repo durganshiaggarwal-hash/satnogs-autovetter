@@ -199,16 +199,18 @@ class TestWindow:
         theme.configure_plots()
         return application
 
-    def test_seven_tabs_and_results_open_in_the_right_one(self, app, tmp_path):
+    def test_six_tabs_no_dataset_and_results_open_in_the_right_one(self, app, tmp_path):
         from satrecovery.analysis.gui.client import AnalysisClient
         from satrecovery.analysis.gui.window import AnalysisWindow
 
         window = AnalysisWindow(AnalysisClient("http://127.0.0.1:9"), Preferences(tmp_path / "p.json"))
-        assert [p.title for p in window.pages] == ["Real signal", "Simulated signal", "Your own file", "History",
+        # The Real signal tab (it needed the RML24 dataset) is gone; everything runs on the trained AI alone.
+        assert [p.title for p in window.pages] == ["Simulated signal", "Your own file", "History",
                                                    "Many at once", "How good is the AI?", "Compare models"]
+        assert not hasattr(window, "dataset_button")
         assert window.page_for({"input": {"kind": "simulated"}}) is window.simulated
         assert window.page_for({"input": {"kind": "file"}}) is window.file
-        assert window.page_for({"input": {"kind": "recorded"}}) is window.real
+        assert window.page_for({"input": {"kind": "recorded"}}) is window.file   # older RML24 analyses
         dialog = window.show_help()
         dialog.show_page(1)
         assert dialog.pages.currentIndex() == 1 and dialog.words_button.isChecked()
@@ -223,7 +225,7 @@ class TestWindow:
         window = AnalysisWindow(AnalysisClient("http://127.0.0.1:9"), prefs)
         asked = []
         window.theme_changed.connect(asked.append)
-        window._busy.add(window.real)
+        window._busy.add(window.simulated)
         window.dark_switch.setChecked(True)
         assert asked == [] and not window.dark_switch.isChecked() and prefs.dark_mode is False
         window._busy.clear()

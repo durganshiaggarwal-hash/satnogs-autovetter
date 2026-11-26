@@ -130,18 +130,35 @@ class ComparePage(Page):
         left_layout.addWidget(fair_card)
         left_layout.addStretch(1)
 
-        # -- when nothing has been compared yet --------------------------
+        # -- when only the main model exists: what was saved with it --------
+        # The other models have to be trained on RML24 itself; without the
+        # dataset, this shows the model the app uses and how its training went.
         self.empty_card, empty = card(
-            "No comparison yet",
-            "The models have to be trained once, on your computer (the GPU makes it much faster).")
+            "The model this app uses",
+            "Trained once on the RML24 dataset; the app needs only the saved model, not the dataset.")
+        self.card_facts = QLabel("")
+        self.card_facts.setTextFormat(Qt.RichText)
+        self.card_facts.setWordWrap(True)
+        empty.addWidget(self.card_facts)
+        self.training_curve = pg.PlotWidget()
+        self.training_curve.setMinimumHeight(320)
+        self.training_curve.setMouseEnabled(False, False)
+        self.training_curve.setMenuEnabled(False)
+        self.training_curve.setLabel("left", "loss (lower is better)")
+        self.training_curve.setLabel("bottom", "training pass (epoch)")
+        self.training_curve.showGrid(x=True, y=True, alpha=0.2)
+        empty.addWidget(self.training_curve)
+        self.curve_key = QLabel("")
+        self.curve_key.setTextFormat(Qt.RichText)
+        self.curve_key.setWordWrap(True)
+        empty.addWidget(self.curve_key)
         self.empty_text = QLabel(
-            "In the project folder, run:<br><br>"
-            f"<code>{COMMAND}</code><br><br>"
-            "It trains all six models one after another (about 1–2 hours on a GPU). For a quick try first:<br><br>"
-            f"<code>{QUICK_COMMAND}</code><br><br>"
-            "Then press <b>Reload results</b>.")
+            "The other kinds of model (plain CNN, LSTM, Transformer, ResNet without expert features, random "
+            "forest) learn from RML24 itself, so they appear here only once they have been trained on the "
+            f"dataset with <code>{COMMAND}</code>. To see how well the model in use does on new signals, "
+            "open <b>How good is the AI?</b>.")
         self.empty_text.setTextFormat(Qt.RichText)
-        self.empty_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.empty_text.setObjectName("Hint")
         self.empty_text.setWordWrap(True)
         empty.addWidget(self.empty_text)
 
@@ -213,8 +230,8 @@ class ComparePage(Page):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 18, 14, 10)
         layout.setSpacing(10)
-        layout.addWidget(self.heading(self.title, "Different kinds of AI trained on the same recordings, tested on "
-                                                  "the same unseen recordings — which one names the signal best?"))
+        layout.addWidget(self.heading(self.title, "The AI this app uses, and how its training went. Other kinds of "
+                                                  "AI join it here once they are trained on RML24."))
         layout.addWidget(self.scrolling(content), 1)
         self.empty_card.hide()
         self.results_box.hide()
@@ -226,6 +243,32 @@ class ComparePage(Page):
     # -- loading ----------------------------------------------------------
     def refresh(self) -> None:
         self.tasks.run(self.client.models, self.show_listing, self.report_error)
+        self.tasks.run(self.client.model_card, self.show_model_card, lambda _error: None)
+
+    def show_model_card(self, saved: dict) -> None:
+        """The model in use, as saved: kind, size, RML24 test score, and its training curve."""
+        size = saved.get("n_parameters")
+        accuracy = saved.get("test_accuracy")
+        facts = [f"<b>{(saved.get('architecture') or 'model').upper()}</b> with expert features, "
+                 f"naming {len(saved.get('classes') or [])} types: {', '.join(saved.get('classes') or [])}."]
+        if size:
+            facts.append(f"{size / 1e3:,.0f} thousand weights learned.")
+        if accuracy is not None:
+            facts.append(f"Tested on RML24 recordings it never saw: <b>{100 * accuracy:.1f}%</b> named correctly, "
+                         "across every signal quality from -20 to +20 dB.")
+        self.card_facts.setText("  ".join(facts))
+        epochs, loss, val = saved.get("epochs") or [], saved.get("loss") or [], saved.get("val_loss") or []
+        self.training_curve.clear()
+        if loss:
+            self.training_curve.plot(epochs[:len(loss)], loss, pen=pg.mkPen(theme.MAUVE, width=2.5))
+        if val:
+            self.training_curve.plot(epochs[:len(val)], val, pen=pg.mkPen(theme.GOOD, width=2.5))
+        self.curve_key.setText(
+            f"<span style='color:{theme.MAUVE}'>&#8212;</span> on the recordings it learned from &nbsp;&nbsp; "
+            f"<span style='color:{theme.GOOD}'>&#8212;</span> on recordings kept aside to check it "
+            f"({len(loss)} passes)." + (" The two lines end close together, so it learned the types rather than "
+                                        "memorising its examples." if loss and val and val[-1] <= 1.1 * loss[-1]
+                                        else ""))
 
     def show_listing(self, listing: dict) -> None:
         self._listing = listing
@@ -316,7 +359,7 @@ class ComparePage(Page):
                 _size(r.get("n_parameters"), model["name"]),
                 _duration(r.get("train_seconds")),
                 f"{r['ms_per_recording']:.1f} ms" if r.get("ms_per_recording") is not None else "–",
-                "✓ in use" if model["active"] else ("" if model["available"] else "not saved"),
+                "in use" if model["active"] else ("" if model["available"] else "not saved"),
             ]
             for column, text in enumerate(cells):
                 item = QTableWidgetItem(text)
@@ -325,7 +368,7 @@ class ComparePage(Page):
                     item.setForeground(QColor(self._colour(model["name"])))
                 if best.get(column) == model["name"]:
                     item.setForeground(QColor(theme.GOOD))
-                    item.setText(text + "  ★")
+                    item.setText(text + "  (best)")
                 if column == 6 and model["active"]:
                     item.setForeground(QColor(theme.GOOD))
                 self.table.setItem(row, column, item)
@@ -368,7 +411,7 @@ class ComparePage(Page):
         self.chosen_about.setText(model["about"])
         self._fit_labels()
         self.use_button.setEnabled(bool(model["available"]) and not model["active"])
-        self.use_button.setText("In use ✓" if model["active"] else "Use this model")
+        self.use_button.setText("In use" if model["active"] else "Use this model")
         r = model.get("results")
         classes = ((self._listing or {}).get("setup") or {}).get("classes")
         if r and r.get("confusion_0db_plus") and classes:

@@ -17,26 +17,21 @@ from ...gui.motion import PillButton
 
 #: (tab or button, what it is for)
 HOW_TO_USE: list[tuple[str, str]] = [
-    ("Real signal", "Pick a real satellite recording from RML24 (1.3 million of them). The AI says what kind of "
-                    "signal it is, the receiver cleans it up and reads the bits, and where possible every bit is "
-                    "checked."),
     ("Simulated signal", "Make your own signal and damage it with the sliders: weaker signal, Doppler shift, "
                          "echoes. Then watch the AI and the receiver deal with it."),
     ("Your own file", "Give the app a file of signal samples (CSV, .npy, or a recording exported from RML24). "
                       "It tells you what the signal is and reads its bits. Try the files in the examples folder."),
     ("History", "Every analysis is saved here by itself. Double-click one to open it again."),
-    ("Many at once", "Analyse a whole group of recordings, for example 100 of 8PSK at +16 dB, and get one "
-                     "summary table. Save it for Excel."),
-    ("How good is the AI?", "Tests the AI on recordings it never saw while learning, and shows where it goes "
-                            "wrong. Double-click a mistake to open it."),
-    ("Compare models", "Six kinds of AI (ResNet, plain CNN, LSTM, Transformer, Random Forest...) trained on the "
-                       "same recordings and tested on the same unseen ones: one accuracy line each, a table of "
-                       "accuracy, size and speed, and a button to make the app use any of them."),
+    ("Many at once", "Make a whole group of new signals, for example 100 of 8PSK at +16 dB, let the AI name "
+                     "each one, and get one summary table. Save it for Excel."),
+    ("How good is the AI?", "Tests the AI (trained on RML24) on new simulated signals of every type and quality, "
+                            "and shows where it goes wrong. Double-click a mistake to make it again."),
+    ("Compare models", "The model the app uses: what it is, its score on RML24, and how its training went. Other "
+                       "kinds of AI appear here once they have been trained on the RML24 dataset."),
     ("Save report (PDF)", "After an analysis, saves a short report of it as a PDF."),
-    ("Save as test file", "On the Real and Simulated tabs: saves the signal together with its answer key (its "
+    ("Save as test file", "On the Simulated tab: saves the signal together with its answer key (its "
                           "true type and the bits sent). Load it in Your own file and everything is graded. Choose 'Two CSV files for Excel' in "
                           "the save window to get a signal CSV and a bits CSV you can open in Excel."),
-    ("Dataset (top bar)", "Choose the RML24 folder. The app remembers it for next time."),
     ("Dark and Animations (top bar)", "Dark switches the colours; Animations turns the moving pictures on or off."),
 ]
 
@@ -63,10 +58,10 @@ WORDS: list[tuple[str, str]] = [
                                        "Transformer compares every part with every other part."),
     ("Random Forest", "Not a neural network: hundreds of simple yes/no decision trees that vote."),
     ("Expert features", "12 measurements from classical signal theory that help tell similar types apart."),
-    ("RML24", "A public collection of 1.3 million real satellite signal recordings, used to train and test the AI."),
+    ("RML24", "A public collection of 1.3 million real satellite signal recordings, used to train the AI once. The app keeps only the trained AI, so the dataset is not needed to use it."),
     ("Test file", "A signal file that also holds its answer key, so the app can mark its own answers."),
-    ("Warning badge", "Under the AI's answer: ✓ Confident, ⚠ Unsure (weak or close answer, very noisy signal) or "
-                      "⚠ Unfamiliar (mostly noise, or a signal width that does not fit the speed). It cannot catch "
+    ("Warning badge", "Under the AI's answer: Confident, Unsure (weak or close answer, very noisy signal) or "
+                      "Unfamiliar (mostly noise, or a signal width that does not fit the speed). It cannot catch "
                       "every mistake; the How good is the AI? tab shows how many it catches."),
     ("Check pattern", "A few known symbols every 32, so the receiver can confirm it is reading the right way up. "
                       "They are not counted in the score."),

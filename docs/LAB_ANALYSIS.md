@@ -31,12 +31,12 @@ At the end it shows the recovered bits and, where the true bits are
 known, **how many were wrong**.
 
 ```
-Damaged signal ──► AI classifier: "QPSK, 97% sure"
-                        │
-                        ▼
+Damaged signal --> AI classifier: "QPSK, 97% sure"
+                        |
+                        v
                   Receiver repairs it   (animated: 6 stages)
-                        │
-                        ▼
+                        |
+                        v
             Recovered message: 986 bits, 0 wrong
 ```
 
@@ -75,9 +75,9 @@ tab. To load a pair, choose the `_signal.csv`: the app finds the `_bits.csv` bes
 *Choose bits file…*) and grades everything. A pair made by hand works too, as long as the number of
 bits fits the signal; if not, the app says how many it expected.
 
-**The warning badge.** Under the AI's answer, a badge says how far to trust it: **✓ Confident**,
-**⚠ Unsure** (the top answer is under 60%, or less than 25 points ahead of the next; or the signal is
-very noisy; or the receiver is sure of under half the bits) or **⚠ Unfamiliar** (the signal is mostly
+**The warning badge.** Under the AI's answer, a badge says how far to trust it: **Confident**,
+**Unsure** (the top answer is under 60%, or less than 25 points ahead of the next; or the signal is
+very noisy; or the receiver is sure of under half the bits) or **Unfamiliar** (the signal is mostly
 noise, below about −5 dB, or its width does not fit the chosen speed). The noise level is estimated
 from the spectrum on the same scale as RML24's labels; on the simulator it lands within half a dB of
 the truth, and on two real RML24 recordings labelled +18 and +20 dB it reads about +17. The warning
@@ -175,7 +175,7 @@ satrecovery/analysis/
 └── gui/            the window, the tabs, the animation widget, the PDF report (pdf.py),
                     History (history.py), Many at once (batch.py), the guide (help.py)
 examples/           signal files to try in the "Your own file" tab
-packaging/          the double-click app: see BUILD_APP.txt
+packaging/          the double-click app: see docs/BUILD_APP.txt
 scripts/train_classifier.py
 tests/test_analysis.py
 ```

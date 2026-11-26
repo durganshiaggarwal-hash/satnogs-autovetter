@@ -1,5 +1,24 @@
 .venv/
 __pycache__/
 *.pyc
-satrecovery_data/
 .pytest_cache/
+.DS_Store
+
+# Downloaded data and local state stay local (SatNOGS waterfalls are ~700 MB).
+satrecovery_data/*
+!satrecovery_data/models/
+satrecovery_data/models/*
+!satrecovery_data/models/vetter_bundle.json
+!satrecovery_data/models/vetter_bundle.npz
+!satrecovery_data/models/vetter_bundle.pt
+!satrecovery_data/models/classifier.json
+!satrecovery_data/models/classifier.pt
+!satrecovery_data/satnogs/
+satrecovery_data/satnogs/*
+!satrecovery_data/satnogs/comparisons/
+satrecovery_data/satnogs/comparisons/*
+!satrecovery_data/satnogs/comparisons/run_20261125_1841_full.json
+!satrecovery_data/satnogs/comparisons/run_20261125_1841_full.png
+
+# Private paperwork with personal details
+PROJECT_WRITE_UP.doc

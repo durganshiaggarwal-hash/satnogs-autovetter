@@ -69,7 +69,7 @@ class VettingWindow(QMainWindow):
         self._current: int | None = None
         self.setWindowTitle("SatNOGS vetting station")
         self.resize(1440, 860)
-        self.setStyleSheet(theme.STYLE)
+        self.setStyleSheet(theme.STYLE + theme.EXPERT)
 
         root = QWidget()
         outer = QVBoxLayout(root)
@@ -138,6 +138,7 @@ class VettingWindow(QMainWindow):
         self.mode_buttons = {}
         for mode in self._session.modes:
             button = QPushButton()
+            button.setObjectName("tab")
             button.setCheckable(True)
             button.clicked.connect(lambda _=False, m=mode: self._set_mode(m))
             self.mode_buttons[mode] = button
@@ -193,7 +194,7 @@ class VettingWindow(QMainWindow):
     def _queue_panel(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("panel")
-        panel.setMinimumWidth(400)
+        panel.setMinimumWidth(480)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(10, 10, 10, 10)
         row = QHBoxLayout()
@@ -212,11 +213,11 @@ class VettingWindow(QMainWindow):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(24)
+        self.table.verticalHeader().setDefaultSectionSize(30)
         self.table.setShowGrid(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
-        for column, width in enumerate((72, 60, 84, 0, 52)):
+        for column, width in enumerate((100, 70, 96, 0, 62)):
             if width:
                 header.resizeSection(column, width)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
@@ -245,6 +246,7 @@ class VettingWindow(QMainWindow):
         layout.addWidget(caps("model"))
         self.verdict = QLabel()
         self.verdict.setObjectName("counter")
+        self.verdict.setWordWrap(True)
         layout.addWidget(self.verdict)
         self.meter = Meter()
         layout.addWidget(self.meter)
@@ -275,7 +277,7 @@ class VettingWindow(QMainWindow):
         self.answer.setObjectName("mono")
         layout.addWidget(self.answer)
         layout.addStretch(1)
-        link = QPushButton("OPEN ON SATNOGS ↗")
+        link = QPushButton("Open on SatNOGS  →")
         link.clicked.connect(self._open_satnogs)
         layout.addWidget(link)
         return panel
@@ -359,9 +361,6 @@ class VettingWindow(QMainWindow):
             title = {"unvetted": "UNVETTED", "test": "TEST SET", "latest": "LATEST"}[mode]
             button.setText(f"{title} · {self._session.count(mode)}")
             button.setChecked(mode == self._session.mode)
-            button.setObjectName("primary" if mode == self._session.mode else "")
-            button.style().unpolish(button)
-            button.style().polish(button)
         if self._session.mode == "latest":
             self.banner.setText(
                 f"<span style='color:{theme.ACCENT}'>LIVE</span> · newest SatNOGS recordings, mostly unchecked · "
@@ -408,7 +407,7 @@ class VettingWindow(QMainWindow):
         self.c_check.value.setText(str(stats["to_check"]))
         self.c_auto.value.setText(str(stats["auto"]))
         self.c_you.value.setText(str(stats["yours"]))
-        self.thresholds.setText(f"⚙  {self._session.policy.low:.2f} · {self._session.policy.high:.2f}")
+        self.thresholds.setText(f"Thresholds  {self._session.policy.low:.2f} · {self._session.policy.high:.2f}")
         remaining = stats["confident"] - stats["auto"]
         self.auto_button.setText(f"AUTO-VET {max(remaining, 0)}")
         self.auto_button.setToolTip("Record the model's answer for every confident recording not yet decided.")

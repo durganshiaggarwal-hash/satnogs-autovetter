@@ -1,0 +1,57 @@
+{
+ "trained_at": 1795612423.975214,
+ "n_train": 5000,
+ "temperature": 0.8152880320469775,
+ "showcase": [
+  {
+   "id": 15489000,
+   "norad_cat_id": 39441,
+   "ground_station": 91,
+   "station_name": "M0EYT",
+   "start": "2026-11-19T12:50:05+00:00",
+   "end": "2026-11-19T12:58:56+00:00",
+   "status": "bad",
+   "waterfall_label": "without-signal",
+   "labelled_by_human": true,
+   "transmitter_mode": "FM",
+   "transmitter_baud": null,
+   "frequency_hz": 980000000,
+   "n_decoded_frames": 0,
+   "max_altitude_deg": 77.37890015874696,
+   "waterfall_url": "https://s3.eu-central-1.wasabisys.com/satnogs-network/data_obs/2026/11/19/12/15489000/waterfall_15489000_2026-11-19T12-50-05.png",
+   "audio_url": "https://network-satnogs.freetls.fastly.net/media/data_obs/2026/11/19/12/15489000/satnogs_15489000_2026-11-19T12-50-05.ogg",
+   "tle": [
+    "1 39441U 13066AB  26322.78803188  .00002679  00000-0  29354-3 0  9995",
+    "2 39441  97.9039 261.0546 0063881 282.9998  76.4091 14.87163581699170"
+   ],
+   "station_lat": null,
+   "station_lng": null,
+   "station_alt": null
+  },
+  {
+   "id": 15490378,
+   "norad_cat_id": 60525,
+   "ground_station": 2173,
+   "station_name": "PE0SAT-21",
+   "start": "2026-11-19T11:28:34+00:00",
+   "end": "2026-11-19T11:33:23+00:00",
+   "status": "bad",
+   "waterfall_label": "without-signal",
+   "labelled_by_human": true,
+   "transmitter_mode": "GMSK",
+   "transmitter_baud": 9600.0,
+   "frequency_hz": 436500000,
+   "n_decoded_frames": 0,
+   "max_altitude_deg": 45.44138916540795,
+   "waterfall_url": "https://s3.eu-central-1.wasabisys.com/satnogs-network/data_obs/2026/11/19/11/15490378/waterfall_15490378_2026-11-19T11-28-34.png",
+   "audio_url": "https://network-satnogs.freetls.fastly.net/media/data_obs/2026/11/19/11/15490378/satnogs_15490378_2026-11-19T11-28-34.ogg",
+   "tle": [
+    "1 60525U 24149BK  26322.68282242  .00031058  00000-0  52978-3 0  9998",
+    "2 60525  97.3639  51.6266 0006100  72.8162 287.3758 15.51273899126375"
+   ],
+   "station_lat": null,
+   "station_lng": null,
+   "station_alt": null
+  }
+ ]
+}

@@ -31,7 +31,7 @@ class Logo(QWidget):
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         painter.setPen(Qt.NoPen)
         painter.setBrush(brand_gradient(rect))
-        painter.drawRoundedRect(rect, 12, 12)
+        painter.drawRoundedRect(rect, 0 if theme.DARK else 12, 0 if theme.DARK else 12)
         ink = QColor(theme.BRAND_DEEP)
         painter.setPen(QPen(ink, 2.2, Qt.SolidLine, Qt.RoundCap))
         painter.setBrush(Qt.NoBrush)

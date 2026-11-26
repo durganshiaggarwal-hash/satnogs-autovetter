@@ -159,7 +159,7 @@ class TestScreens:
         bad = tmp_path / "bad_bits.csv"
         bad.write_text("bit\n0\n", encoding="utf-8")
         page.set_bits_file(bad)
-        assert page._bits_path is None and page.test_info.text().startswith("✕")
+        assert page._bits_path is None and page.test_info.text().startswith("Could not use")
 
     def test_a_test_file_can_be_exported(self, app, tmp_path):
         from satrecovery.analysis.gui.pages import FilePage

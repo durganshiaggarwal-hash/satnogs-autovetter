@@ -152,7 +152,7 @@ class PassTimeline(QWidget):
         top, bottom = 8.0, self.height() - 22.0
         horizon = bottom - 4
         font = QFont(theme.MONO)
-        font.setPixelSize(9)
+        font.setPixelSize(11)
         painter.setFont(font)
         # Where the recording has a signal.
         if len(self._activity):
@@ -174,8 +174,8 @@ class PassTimeline(QWidget):
             fill.lineTo(QPointF(self._x(self._seconds[-1]), horizon))
             fill.lineTo(QPointF(self._x(self._seconds[0]), horizon))
             gradient = QLinearGradient(0, top, 0, horizon)
-            gradient.setColorAt(0, QColor(86, 200, 216, 90))
-            gradient.setColorAt(1, QColor(86, 200, 216, 10))
+            gradient.setColorAt(0, QColor(*theme.ACCENT_RGB, 90))
+            gradient.setColorAt(1, QColor(*theme.ACCENT_RGB, 10))
             painter.fillPath(fill, gradient)
             painter.setPen(QPen(QColor(theme.ACCENT), 1.5))
             painter.drawPath(path)

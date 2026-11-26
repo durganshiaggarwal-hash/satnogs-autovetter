@@ -312,30 +312,38 @@ class AnalysisService:
                     chosen += [(int(r), index, float(snr)) for r in picked]
                     speed_of.update({int(r): float(rate) for r in picked})
         data = load_set(archive, chosen)
-        probabilities = model.predict_proba(data.inputs)
+        samples = [data.inputs[i, 0].astype(np.float64) + 1j * data.inputs[i, 1].astype(np.float64)
+                   for i in range(len(data))]
+        speeds = [speed_of.get(int(data.rows[i]), 250_000.0) for i in range(len(data))]
+        ids = [{"row": int(data.rows[i])} for i in range(len(data))]
+        return self._score(list(model.classes), model.predict_proba(data.inputs), np.asarray(data.targets),
+                           np.asarray(data.snr_db), samples, speeds, ids)
+
+    @staticmethod
+    def _score(classes: list[str], probabilities: np.ndarray, targets: np.ndarray, snr_db: np.ndarray,
+               samples: list, speeds: list, ids: list[dict]) -> dict[str, Any]:
+        """Accuracy by quality, the confusion grid, the warning's record and the mistakes, for any test set."""
         predicted = probabilities.argmax(axis=1)
-        right = predicted == data.targets
-        classes = list(model.classes)
+        right = predicted == targets
 
         by_snr = []
-        for snr in sorted(np.unique(data.snr_db)):
-            keep = data.snr_db == snr
+        for snr in sorted(np.unique(snr_db)):
+            keep = snr_db == snr
             by_snr.append({"snr_db": float(snr), "accuracy": float(right[keep].mean()), "n": int(keep.sum())})
         matrix = np.zeros((len(classes), len(classes)), dtype=int)
-        clean = data.snr_db >= 0
-        np.add.at(matrix, (data.targets[clean], predicted[clean]), 1)
+        clean = snr_db >= 0
+        np.add.at(matrix, (targets[clean], predicted[clean]), 1)
         by_class = []
         for index, name in enumerate(classes):
-            keep = (data.targets == index) & clean
+            keep = (targets == index) & clean
             by_class.append({"name": name, "accuracy": float(right[keep].mean()) if keep.any() else None})
         # The warning, judged on the same held-out recordings: how many of the
         # AI's mistakes does it flag, and how many correct answers does it
         # flag needlessly?
         levels = []
-        for i in range(len(data)):
-            samples = data.inputs[i, 0].astype(np.float64) + 1j * data.inputs[i, 1].astype(np.float64)
+        for i in range(len(targets)):
             ranked = {classes[k]: float(probabilities[i, k]) for k in range(len(classes))}
-            levels.append(TrustCheck.assess(ranked, samples, speed_of.get(int(data.rows[i]), 250_000.0)).level)
+            levels.append(TrustCheck.assess(ranked, samples[i], speeds[i]).level)
         flagged = np.array([level != "confident" for level in levels])
         n_wrong, n_right = int((~right).sum()), int(right.sum())
         warnings = {
@@ -346,18 +354,18 @@ class AnalysisService:
             "accuracy_when_flagged": float(right[flagged].mean()) if flagged.any() else None,
         }
         wrong = np.flatnonzero(~right)
-        wrong = wrong[np.argsort(-data.snr_db[wrong], kind="stable")][:300]
+        wrong = wrong[np.argsort(-snr_db[wrong], kind="stable")][:300]
         mistakes = [{
-            "row": int(data.rows[i]),
-            "snr_label_db": float(data.snr_db[i]),
-            "true": classes[int(data.targets[i])],
+            **ids[i],
+            "snr_label_db": float(snr_db[i]),
+            "true": classes[int(targets[i])],
             "predicted": classes[int(predicted[i])],
             "confidence": float(probabilities[i, predicted[i]]),
             "warning": levels[i],
         } for i in wrong]
-        high = data.snr_db >= 10
+        high = snr_db >= 10
         return {
-            "n": int(len(data)),
+            "n": int(len(targets)),
             "accuracy": float(right.mean()),
             "accuracy_10db_up": float(right[high].mean()) if high.any() else None,
             "by_snr": by_snr,
@@ -366,6 +374,83 @@ class AnalysisService:
             "mistakes": mistakes,
             "n_mistakes": int((~right).sum()),
             "warnings": warnings,
+        }
+
+    def model_card(self) -> dict[str, Any]:
+        """What was saved with the model in use: its kind, size, RML24 test score and training curve."""
+        import ast
+        import json as _json
+
+        meta_path = self._path.with_suffix(".json")
+        if not meta_path.exists():
+            raise HTTPException(status_code=404, detail="No saved details for the model in use.")
+        meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+        history = meta.get("history") or {}
+        if isinstance(history, str):
+            try:
+                history = ast.literal_eval(history)
+            except (ValueError, SyntaxError):
+                history = {}
+        records = history.get("records") or []
+        return {
+            "kind": meta.get("kind") or meta.get("model"), "architecture": meta.get("architecture"),
+            "classes": meta.get("classes") or [], "n_parameters": meta.get("n_parameters"),
+            "test_accuracy": meta.get("test_accuracy"), "trained_at": meta.get("trained_at"),
+            "epochs": list(history.get("epochs") or range(1, len(records) + 1)),
+            "loss": [r.get("loss") for r in records], "val_loss": [r.get("val_loss") for r in records],
+        }
+
+    def evaluate_simulated(self, request: EvaluateRequest) -> dict[str, Any]:
+        """Test the RML24-trained classifier on freshly simulated signals: no dataset needed.
+
+        The simulator makes signals the way RML24 was made (1 MHz, 2048
+        samples, the same pulse, RML24's three speeds), so every type is
+        tested at every one of RML24's signal qualities.
+        """
+        from ..core.conditions import ChannelConditions
+
+        model = self.classifier()
+        if model is None:
+            self.analyser()                                  # raises the "train it first" answer
+        samples, targets, snrs, speeds, ids = [], [], [], [], []
+        seed = int(request.seed) * 1_000_003
+        for index, name in enumerate(model.classes):
+            for snr in layout.SNR_LABELS_DB:
+                for rate in (100_000.0, 250_000.0, 500_000.0):
+                    for _ in range(request.per_group):
+                        seed += 1
+                        signal = SimulatedInput(name, ChannelConditions(snr_db=float(snr)), rate, seed)
+                        samples.append(np.asarray(signal.samples))
+                        targets.append(index)
+                        snrs.append(float(snr))
+                        speeds.append(rate)
+                        ids.append({"row": seed, "seed": seed, "symbol_rate": rate})
+        # The slowest speed fits a whole number of symbols into 2040 samples, not 2048, so the
+        # signals are scored in groups of equal length and the answers put back in order.
+        probabilities = np.zeros((len(samples), len(model.classes)))
+        lengths = np.array([len(x) for x in samples])
+        for length in np.unique(lengths):
+            where = np.flatnonzero(lengths == length)
+            probabilities[where] = model.predict_proba(np.stack([samples[i] for i in where]))
+        result = self._score(list(model.classes), probabilities, np.asarray(targets), np.asarray(snrs), samples,
+                             speeds, ids)
+        result["source"] = "simulated"
+        return result
+
+    def simulated_quick(self, request: SimulatedRequest) -> dict[str, Any]:
+        """One simulated signal, analysed in full but answered in one line (not kept in the history)."""
+        seed = request.seed if request.seed is not None else int(np.random.default_rng().integers(0, 2**31))
+        signal = SimulatedInput(request.modulation, request.conditions.to_domain(), request.symbol_rate, seed)
+        result = self.analyser().analyse(signal)
+        c, check = result["classification"], result["recovery"]["check"]
+        return {
+            "row": int(seed), "seed": int(seed), "really": c["true_label"], "ai_said": c["label"],
+            "confidence": c["confidence"], "correct": bool(c["correct"]),
+            "snr_label_db": float(request.conditions.snr_db), "symbol_rate": float(request.symbol_rate),
+            "checked": bool(check.get("available")), "bit_errors": check.get("bit_errors"),
+            "n_bits": check.get("n_bits"), "ber": check.get("ber"),
+            "bits_recovered": result["recovery"]["n_bits"],
+            "trust": result["trust"]["level"], "warning": " ".join(result["trust"]["reasons"]),
         }
 
     def analyse_recording(self, row: int) -> dict[str, Any]:
@@ -458,6 +543,21 @@ def analysis_router() -> APIRouter:
     def quick(request: Request, body: RecordingRequest) -> dict[str, Any]:
         """Analyse one recording; return only its one-line summary."""
         return service(request).quick(body.row)
+
+    @router.get("/model-card")
+    def model_card(request: Request) -> dict[str, Any]:
+        """The model in use: its kind, size, RML24 test score and training curve."""
+        return service(request).model_card()
+
+    @router.post("/evaluate-simulated")
+    def evaluate_simulated(request: Request, body: EvaluateRequest) -> dict[str, Any]:
+        """Test the classifier on freshly simulated signals of every type and quality (no dataset needed)."""
+        return service(request).evaluate_simulated(body)
+
+    @router.post("/simulated-quick")
+    def simulated_quick(request: Request, body: SimulatedRequest) -> dict[str, Any]:
+        """Analyse one simulated signal; return only its one-line summary (not kept in the history)."""
+        return service(request).simulated_quick(body)
 
     @router.post("/test-file")
     def test_file(request: Request, body: TestFileRequest) -> dict[str, Any]:

@@ -28,9 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--screenshot", help="save a picture of the window and quit (for the report)")
     parser.add_argument("--no-orbit", action="store_true", help="skip the orbit view")
     parser.add_argument("--select", type=int, help="expert mode: open on this observation id")
-    parser.add_argument("--expert", action="store_true", help="open the vetting station (expert mode) directly")
+    parser.add_argument("--expert", action="store_true", help=argparse.SUPPRESS)   # developer tool, not in the app
     parser.add_argument("--replay", type=int, help="open the replay of this observation")
-    parser.add_argument("--screen", choices=("launcher", "intro", "home"), default="launcher")
+    parser.add_argument("--screen", choices=("launcher", "intro", "home", "ai"), default="launcher")
     parser.add_argument("--view", choices=("map", "globe", "sky"), default="map", help="replay: flat map, 3D globe or sky")
     parser.add_argument("--page", choices=("recording", "messages"), default="recording",
                         help="replay: the recording or the decoded packets")

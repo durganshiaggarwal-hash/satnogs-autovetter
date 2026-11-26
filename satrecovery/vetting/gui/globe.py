@@ -112,19 +112,19 @@ class GlobeMap(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#06090e"))
+        painter.fillRect(self.rect(), QColor(theme.BG))
         cx, cy, R = self.width() / 2, (self.height() - 30) / 2, self._radius()
         centre = QPointF(cx, cy)
 
         glow = QRadialGradient(centre, R * 1.18)
-        glow.setColorAt(0.80, QColor(86, 200, 216, 70))
-        glow.setColorAt(1.0, QColor(86, 200, 216, 0))
+        glow.setColorAt(0.80, QColor(*theme.ACCENT_RGB, 70))
+        glow.setColorAt(1.0, QColor(*theme.ACCENT_RGB, 0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(glow)
         painter.drawEllipse(centre, R * 1.18, R * 1.18)
         ocean = QRadialGradient(QPointF(cx - R * 0.35, cy - R * 0.35), R * 1.5)
-        ocean.setColorAt(0.0, QColor("#16304a"))
-        ocean.setColorAt(1.0, QColor("#060c16"))
+        ocean.setColorAt(0.0, QColor("#55677a"))
+        ocean.setColorAt(1.0, QColor("#262d35"))
         painter.setBrush(ocean)
         painter.drawEllipse(centre, R, R)
 
@@ -133,8 +133,8 @@ class GlobeMap(QWidget):
         clip.addEllipse(centre, R, R)
         painter.setClipPath(clip)
         self._graticule(painter)
-        painter.setPen(QPen(QColor("#2f4058"), 0.8))
-        painter.setBrush(QColor("#1d2b3c"))
+        painter.setPen(QPen(QColor("#7a7a7a"), 0.8))
+        painter.setBrush(QColor("#585858"))
         for ring in self._land:
             polygon = self._surface_polygon(ring[:, 1], ring[:, 0])
             if polygon is not None:
@@ -150,7 +150,7 @@ class GlobeMap(QWidget):
         WorldMap._subtitle(self, painter)  # the same subtitles as the flat map
         painter.setPen(QColor(theme.FAINT))
         font = QFont(theme.SANS)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         painter.drawText(QRectF(8, self.height() - 18, 420, 14), Qt.AlignLeft,
                          "Drag to turn the globe.  Satellite drawn at its true height.")
@@ -214,15 +214,15 @@ class GlobeMap(QWidget):
             if self._pulse > 0.35:
                 WorldMap._pulses(painter, sx, sy, float(px), float(py), self._t)
         halo = QRadialGradient(QPointF(sx, sy), 16)
-        halo.setColorAt(0, QColor(86, 200, 216, 170))
-        halo.setColorAt(1, QColor(86, 200, 216, 0))
+        halo.setColorAt(0, QColor(*theme.ACCENT_RGB, 170))
+        halo.setColorAt(1, QColor(*theme.ACCENT_RGB, 0))
         painter.setPen(Qt.NoPen)
         painter.setBrush(halo)
         painter.drawEllipse(QPointF(sx, sy), 16, 16)
         WorldMap._satellite_icon(painter, sx, sy)
         painter.setPen(QColor(INK))
         font = QFont(theme.MONO)
-        font.setPixelSize(10)
+        font.setPixelSize(12)
         painter.setFont(font)
         painter.drawText(QRectF(sx - 80, sy + 12, 160, 14), Qt.AlignHCenter, f"{track.height_km[i]:,.0f} km up")
 
@@ -236,7 +236,7 @@ class GlobeMap(QWidget):
         painter.drawEllipse(QPointF(x, y), 4, 4)
         painter.setPen(QColor(INK))
         font = QFont(theme.SANS)
-        font.setPixelSize(11)
+        font.setPixelSize(13)
         font.setBold(True)
         painter.setFont(font)
         painter.drawText(QRectF(x + 8, y - 8, 220, 16), Qt.AlignLeft | Qt.AlignVCenter,

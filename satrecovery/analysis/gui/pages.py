@@ -385,7 +385,7 @@ class RealSignalPage(AnalysisPage):
                       "  100 kbaud:  BPSK +6 dB,  QPSK +6 dB,  8PSK +12 dB\n"
                       "  250 kbaud:  BPSK +8 dB,  QPSK +10 dB,  8PSK +16 dB\n"
                       "  500 kbaud:  BPSK +12 dB,  QPSK +16 dB,  8PSK hardly ever\n"
-                      "Qualities marked ✓ in the list can usually be checked; there, a recording that can "
+                      "Qualities marked \"bits checked\" in the list can usually be checked; there, a recording that can "
                       "be checked is picked when one is found.")
         note.setObjectName("Muted")
         note.setWordWrap(True)
@@ -428,14 +428,14 @@ class RealSignalPage(AnalysisPage):
             self.pick_recording()
 
     def _mark_checkable_qualities(self) -> None:
-        """Put a ✓ beside the qualities whose bits can usually be checked."""
+        """Mark the qualities whose bits can usually be checked."""
         kind, rate = self.kind.currentData(), self.rate.currentData()
         for i in range(1, self.quality.count()):
             snr = self.quality.itemData(i)
             words = "very clean" if snr >= 16 else "clean" if snr >= 8 else "noisy" if snr >= 0 else "very noisy"
             text = f"{snr:+.0f} dB  ({words})"
             if kind in CHECKABLE and rate is not None and usually_checkable(kind, snr, rate):
-                text += "   ✓ bits checked"
+                text += "   bits checked"
             self.quality.setItemText(i, text)
 
     def _picked_modulation(self) -> str:
@@ -469,7 +469,7 @@ class RealSignalPage(AnalysisPage):
         self._picked = rec["modulation"]
         self.chosen.setText(
             f"Recording #{rec['row']:,}  ·  {rec['symbol_rate'] / 1000:.0f} kbaud  ·  labelled {rec['snr_label_db']:+.0f} dB."
-            + ("\n✓ Its bits can be checked one by one." if rec.get("checkable") else
+            + ("\nIts bits can be checked one by one." if rec.get("checkable") else
                "\nIts bits cannot be checked one by one." if self.kind.currentData() in CHECKABLE else "")
             + "\nIts type stays hidden until the AI has answered.")
         fade_in(self.chosen)
@@ -531,7 +531,30 @@ class SimulatedSignalPage(AnalysisPage):
                 self.kind.addItem(name, name)
             self.kind.setCurrentIndex(max(self.kind.findData("QPSK"), 0))
 
+    def open_simulated(self, modulation: str, snr_db: float, symbol_rate: float, seed: int | None) -> None:
+        """Make exactly this signal again (a mistake from the report) and analyse it."""
+        if self.kind.findData(modulation) < 0:
+            self.kind.addItem(modulation, modulation)
+        self.kind.setCurrentIndex(self.kind.findData(modulation))
+        index = self.rate.findData(float(symbol_rate))
+        if index >= 0:
+            self.rate.setCurrentIndex(index)
+        self.strength.value = float(snr_db)
+        self.doppler.value = 0.0
+        self.echoes.setChecked(False)
+        self._seed_once = int(seed) if seed is not None else None
+        self._snr_once = float(snr_db)        # the slider stops at -10 dB; the test goes down to -20 dB
+        self.analyse()
+
     def request_body(self) -> dict[str, Any]:
+        body = self._request_body()
+        if getattr(self, "_seed_once", None) is not None:
+            body["seed"] = self._seed_once
+            body["conditions"]["snr_db"] = self._snr_once
+        self._seed_once = None
+        return body
+
+    def _request_body(self) -> dict[str, Any]:
         return {
             "modulation": self.kind.currentData() or "QPSK",
             "symbol_rate": self.rate.currentData(),
@@ -658,7 +681,7 @@ class FilePage(AnalysisPage):
             info = CsvTestFile.read_bits(path.read_bytes(), path.name)
         except (OSError, ValidationError) as error:
             self._bits_path = None
-            self._show_key(f"✕ {path.name}: {error}", False)
+            self._show_key(f"Could not use {path.name}: {error}", False)
             return
         self._bits_path = path
         self._show_key(CsvTestFile.summary(info, path.name), True, info["speed_baud"])

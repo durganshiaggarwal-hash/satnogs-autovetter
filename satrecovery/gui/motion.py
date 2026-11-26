@@ -153,9 +153,9 @@ def brand_gradient(rect: QRectF, colours=None) -> QLinearGradient:
     return gradient
 
 
-def font(family: str = theme.SANS, points: float = theme.BASE_PT) -> QFont:
+def font(family: str = theme.SANS, points: float | None = None) -> QFont:
     face = QFont(family)
-    face.setPointSizeF(points)
+    face.setPointSizeF(points if points is not None else theme.BASE_PT)   # read now: the dark look is larger
     return face
 
 
@@ -261,7 +261,7 @@ class PillButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        radius = min(theme.RADIUS_CONTROL + 2, rect.height() / 2)
+        radius = 0.0 if theme.DARK else min(theme.RADIUS_CONTROL + 2, rect.height() / 2)
         path = QPainterPath()
         path.addRoundedRect(rect, radius, radius)
         enabled = self.isEnabled()
@@ -590,25 +590,26 @@ class TabBar(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         if not self._pill.isNull():
             pill = QPainterPath()
-            pill.addRoundedRect(self._pill, self._pill.height() / 2, self._pill.height() / 2)
+            pill.addRoundedRect(self._pill, theme.corner(self._pill.height()), theme.corner(self._pill.height()))
             painter.fillPath(pill, self._pill_colour)
         for i, title in enumerate(self._titles):
             rect = self._tab_rect(i)
             accent = QColor(theme.page_accent(title))
             if i == self._hovered and i != self._current:
                 hover = QPainterPath()
-                hover.addRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+                hover.addRoundedRect(rect, theme.corner(rect.height()), theme.corner(rect.height()))
                 painter.fillPath(hover, QColor(theme.SUNK))
             painter.setPen(Qt.NoPen)
             painter.setBrush(accent)
             painter.drawEllipse(QPointF(rect.left() + 17, rect.center().y()), 4, 4)
-            painter.setPen(accent.darker(125) if i == self._current else QColor(theme.INK_2))
+            painter.setPen((QColor(theme.INK) if theme.DARK else accent.darker(125)) if i == self._current
+                           else QColor(theme.INK_2))
             painter.setFont(font(theme.SANS_SEMIBOLD))
             painter.drawText(rect.adjusted(28, 0, -12, 0), Qt.AlignVCenter | Qt.AlignLeft, title)
-        if self.hasFocus() and not self._pill.isNull():
+        if self.hasFocus() and not self._pill.isNull() and not theme.DARK:   # dark: the grey tile is enough
             painter.setPen(QPen(QColor(theme.FOCUS), 1.5))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(self._pill, self._pill.height() / 2, self._pill.height() / 2)
+            painter.drawRoundedRect(self._pill, theme.corner(self._pill.height()), theme.corner(self._pill.height()))
 
 
 class AnimatedTabs(QWidget):
@@ -697,23 +698,22 @@ class AnimatedTabs(QWidget):
 class Toast(QFrame):
     """A short message that slides up in the corner, then leaves."""
 
-    KINDS = {"success": (theme.GOOD, "✓"), "info": (theme.BRAND_DEEP, "i"), "error": (theme.CRITICAL, "!")}
+    KINDS = {"success": "GOOD", "info": "BRAND_DEEP", "error": "CRITICAL"}   # theme colour names
 
     def __init__(self, text: str, kind: str, parent: QWidget) -> None:
         super().__init__(parent)
-        colour, glyph = self.KINDS.get(kind, self.KINDS["info"])
+        colour = getattr(theme, self.KINDS.get(kind, "BRAND_DEEP"))
         self.setObjectName("Toast")
+        background, ink = (theme.SUNK, theme.INK) if theme.DARK else (theme.INK, theme.SURFACE)
         self.setStyleSheet(
-            f"QFrame#Toast {{ background: {theme.INK}; border-radius: 12px; }}"
-            f"QLabel {{ color: {theme.SURFACE}; background: transparent; }}"
+            f"QFrame#Toast {{ background: {background}; border-radius: {0 if theme.DARK else 12}px; "
+            f"border: {'1px solid ' + theme.LINE if theme.DARK else 'none'}; }}"
+            f"QLabel {{ color: {ink}; background: transparent; }}"
         )
-        badge = QLabel(glyph)
-        badge.setAlignment(Qt.AlignCenter)
-        badge.setFixedSize(24, 24)
-        badge.setStyleSheet(
-            f"background: {colour}; color: white; border-radius: 12px; "
-            f"font-family: '{theme.SANS_EXTRABOLD}'; font-size: 10pt;"
-        )
+        # A coloured bar says what kind of message it is (no symbols).
+        badge = QLabel("")
+        badge.setFixedSize(4, 24)
+        badge.setStyleSheet(f"background: {colour}; border-radius: 0;")
         label = QLabel(text)
         label.setWordWrap(True)
         label.setMaximumWidth(340)
@@ -912,7 +912,7 @@ class Collapsible(QWidget):
         content.setVisible(expanded)
 
     def _label(self) -> str:
-        return f"{'▾' if self._open else '▸'}  {self._title}"
+        return f"{'–' if self._open else '+'}  {self._title}"
 
     @property
     def expanded(self) -> bool:
