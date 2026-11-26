@@ -200,7 +200,7 @@ class ModulationClassifier(TrainableModel):
                 raise ValidationError("samples", x.shape, "expected complex samples or (n, length, 2) pairs")
             z = x[..., 0].astype(np.float32) + 1j * x[..., 1].astype(np.float32)
         z = z - z.mean(axis=1, keepdims=True)
-        power = np.sqrt(np.mean(np.abs(z) ** 2, axis=1, keepdims=True))
+        power = np.sqrt(np.mean(np.abs(z).astype(np.float64) ** 2, axis=1, keepdims=True))  # no float32 overflow
         z = z / np.maximum(power, 1e-12)
         return np.stack([z.real, z.imag], axis=1).astype(np.float32)
 

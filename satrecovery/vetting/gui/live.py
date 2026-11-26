@@ -16,6 +16,34 @@ from .. import ArtifactCache, Manifest, SatnogsApiSource
 from ..unvetted import fetch_latest
 
 
+OFFLINE = "No internet connection: showing the recordings saved on this computer."
+
+
+def online(host: str = "network.satnogs.org", timeout: float = 4.0) -> bool:
+    """Can SatNOGS be reached at all?  A few seconds, instead of the downloader's full retry cycle.
+
+    Behind a proxy a direct connection says nothing, so then assume yes and
+    let the real requests decide.
+    """
+    import os
+    import socket
+
+    if any(os.environ.get(name) for name in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")):
+        return True
+    try:
+        socket.create_connection((host, 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def plain(message: str) -> str:
+    """The downloader's progress line, with network failures said plainly."""
+    if message.startswith("SatNOGS problem") and ("could not reach" in message or "stayed busy" in message):
+        return "Lost the connection to SatNOGS: showing the recordings saved on this computer."
+    return message
+
+
 class _Closed(Exception):
     """The window closed while the feed was running."""
 
@@ -57,16 +85,20 @@ class LiveFeed(QObject):
             def run(self) -> None:
                 added = 0
                 try:
-                    added = fetch_latest(SatnogsApiSource(), feed._cache, feed._manifest, feed.count, workers=6,
-                                         progress=lambda text: say(feed.status, text),
+                    if not online():
+                        say(feed.status, OFFLINE)      # no "finished": that would say "Up to date"
+                        return
+                    added = fetch_latest(SatnogsApiSource(max_retries=2), feed._cache, feed._manifest, feed.count,
+                                         workers=6, progress=lambda text: say(feed.status, plain(text)),
                                          added=lambda obs: say(feed.arrived, obs))
                 except _Closed:
                     return
-                except Exception as error:  # noqa: BLE001 - no network must not take the window down
+                except Exception:  # noqa: BLE001 - no network must not take the window down
                     try:
-                        say(feed.status, f"Could not reach SatNOGS ({type(error).__name__}); showing saved recordings.")
+                        say(feed.status, "Could not reach SatNOGS: showing the recordings saved on this computer.")
                     except _Closed:
-                        return
+                        pass
+                    return                             # not "finished": the status says what happened
                 finally:
                     feed.running = False
                 try:

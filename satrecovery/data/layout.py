@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Final
 
+import numpy as np
+
 from ..core.exceptions import ValidationError
 
 #: Class order, from the authors' ``RML24_Baseline/Cm-Acc.py``.  Their
@@ -84,7 +86,10 @@ def samples_per_symbol(symbol_rate: float) -> int:
     fractional oversampling factor would need a resampler first, and
     rounding it silently would put every symbol in the wrong place.
     """
-    ratio = SAMPLE_RATE_HZ / float(symbol_rate)
+    symbol_rate = float(symbol_rate)
+    if not np.isfinite(symbol_rate) or symbol_rate <= 0:
+        raise ValidationError("symbol_rate", symbol_rate, "must be a positive number of symbols per second")
+    ratio = SAMPLE_RATE_HZ / symbol_rate
     if ratio < 2 or abs(ratio - round(ratio)) > 1e-9:
         raise ValidationError(
             "symbol_rate",

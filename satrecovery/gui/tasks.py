@@ -52,11 +52,19 @@ class _Call(QRunnable):
         try:
             result = self._function()
         except BackendError as error:
-            self.signals.failed.emit(error)
+            self._send(self.signals.failed, error)
         except Exception as error:  # noqa: BLE001 - surfaced to the user, not swallowed
-            self.signals.failed.emit(BackendError(-1, f"{type(error).__name__}: {error}"))
+            self._send(self.signals.failed, BackendError(-1, f"{type(error).__name__}: {error}"))
         else:
-            self.signals.succeeded.emit(result)
+            self._send(self.signals.succeeded, result)
+
+    @staticmethod
+    def _send(signal, value) -> None:
+        """Deliver the result, unless the window closed while the call ran."""
+        try:
+            signal.emit(value)
+        except RuntimeError:          # "Signal source has been deleted"
+            pass
 
 
 class TaskRunner(QObject):

@@ -34,12 +34,17 @@ def _short(name: str) -> str:
 def tell(item: Item, explanation: TrackExplanation | None, satellite: str, policy: Policy = Policy()) -> Story:
     """The plain-English verdict for one recording."""
     p = item.probability
-    verdict = policy.verdict(p)
+    verdict = policy.verdict(p, item.obs.n_decoded_frames)
     sure = max(1, min(5, int(abs(p - 0.5) * 10 + 0.5)))   # halves round up (round() would give 4 for 95%)
     source = explanation.source if explanation is not None else None
     best = explanation.matches[0] if explanation is not None and explanation.matches else None
     physics_dots = 5 if best is not None and best.share >= 0.8 else 4 if best is not None and best.share >= 0.5 else 3
 
+    packets = item.obs.n_decoded_frames
+    if packets > 0:        # decoded data is proof, whatever the picture or the physics suggest
+        return Story("heard", f"The station heard {satellite}",
+                     f"It decoded {packets} data packet{'s' if packets != 1 else ''} from this pass, so the "
+                     "satellite was certainly heard.", 5)
     if source == "ground":
         return Story("not heard", f"That wasn't {satellite}",
                      "The bright line is a radio transmitter on the ground near the station, not a satellite: "

@@ -76,11 +76,13 @@ class SignalFile:
             raise ValidationError("file", name, f"larger than {MAX_BYTES // (1024 * 1024)} MB")
         try:
             if suffix in (".csv", ".txt"):
-                values = cls._text(data)
+                values = cls._text(data, name)
             elif suffix == ".npy":
                 values = np.load(io.BytesIO(data), allow_pickle=False)
             else:
                 with np.load(io.BytesIO(data), allow_pickle=False) as archive:
+                    if not archive.files:
+                        raise ValidationError("file", name, "the .npz archive is empty")
                     key = "iq" if "iq" in archive.files else archive.files[0]
                     values = np.asarray(archive[key])
                     if key == "iq" and values.ndim == 3:
@@ -88,11 +90,13 @@ class SignalFile:
         except ValidationError:
             raise
         except Exception as error:  # a damaged file: say so plainly
+            if suffix in (".npy", ".npz") and not data.startswith((b"\x93NUMPY", b"PK")):
+                raise ValidationError("file", name, f"is not a valid {suffix} file") from None
             raise ValidationError("file", name, f"could not be read ({error})") from None
         return cls._to_complex(np.asarray(values), name)
 
     @staticmethod
-    def _text(data: bytes) -> np.ndarray:
+    def _text(data: bytes, name: str = "text") -> np.ndarray:
         text = data.decode("utf-8", errors="replace").replace(",", " ").replace(";", " ").replace("\t", " ")
         rows = []
         for line in text.splitlines():
@@ -103,9 +107,9 @@ class SignalFile:
                 rows.append([float(p) for p in parts[:2]])
             except ValueError:
                 if rows:                     # only the first line may be a header
-                    raise ValidationError("file", "text", f"not a number on line {len(rows) + 2}") from None
+                    raise ValidationError("file", name, f"not a number on line {len(rows) + 2}") from None
         if not rows or any(len(r) != 2 for r in rows):
-            raise ValidationError("file", "text", "expected two columns, I and Q")
+            raise ValidationError("file", name, "expected two columns, I and Q")
         return np.asarray(rows, dtype=float)
 
     @staticmethod
@@ -121,6 +125,8 @@ class SignalFile:
         z = np.asarray(z, dtype=np.complex128)
         if not np.all(np.isfinite(z)):
             raise ValidationError("file", name, "contains empty or infinite values")
+        if z.size and not np.any(z):
+            raise ValidationError("file", name, "is silent: every sample is zero")
         return z
 
 
@@ -202,9 +208,10 @@ def input_from_file(name: str, data: bytes, symbol_rate: float | None) -> Signal
                 row = int(archive.select(archive.modulations()[0])[0]) if archive.modulations() else None
                 if row is not None:
                     return RecordedInput(archive, row, file_name=name)
+    samples = SignalFile.read(name, data)          # a file that cannot be read says so first
     if symbol_rate is None:
         raise ValidationError("symbol_rate", None, "say the symbol rate: 100, 250 or 500 kbaud")
-    return FileInput(name, SignalFile.read(name, data), symbol_rate)
+    return FileInput(name, samples, symbol_rate)
 
 
 __all__ = ["FileInput", "LENGTH", "MIN_LENGTH", "SignalFile", "input_from_file"]

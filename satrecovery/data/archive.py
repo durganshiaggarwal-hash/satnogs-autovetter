@@ -169,7 +169,10 @@ class RML24File(RecordingArchive):
 
         super().__init__(path.name)
         self._path = path
-        self._file = h5py.File(path, "r")
+        try:
+            self._file = h5py.File(path, "r")
+        except OSError as error:          # not HDF5 at all, or damaged
+            raise ValidationError("path", str(path), f"not an HDF5 file ({error.__class__.__name__})") from None
         missing = [k for k in ("IQ_data", "class", "snr", "symbol_rate") if k not in self._file]
         if missing:
             self._file.close()
@@ -214,7 +217,11 @@ class SampleArchive(RecordingArchive):
         path = Path(path).expanduser()
         if not path.is_file():
             raise ValidationError("path", str(path), "file not found")
-        with np.load(path, allow_pickle=False) as data:
+        try:
+            data = np.load(path, allow_pickle=False)
+        except (OSError, ValueError) as error:      # not a zip, damaged, or pickled objects
+            raise ValidationError("path", str(path), f"cannot be read as .npz ({error.__class__.__name__})") from None
+        with data:
             missing = [k for k in self.KEYS if k not in data.files]
             if missing:
                 raise ValidationError("path", str(path), f"not a sample archive: no {', '.join(missing)}")

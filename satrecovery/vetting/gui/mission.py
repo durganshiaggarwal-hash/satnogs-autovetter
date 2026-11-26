@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSlider,
     QStackedWidget,
     QVBoxLayout,
@@ -582,7 +583,7 @@ class ReplayScreen(QWidget):
             worker = OrbitWorker(self._explainer, obs, self._power)
             worker.signals.done.connect(self._explained)
             worker.signals.failed.connect(lambda oid, _msg: oid == obs.id and self._show_story(None, final=True))
-            self._workers.append(worker)
+            self._workers = OrbitWorker.prune(self._workers) + [worker]
             from PySide6.QtCore import QThreadPool
 
             QThreadPool.globalInstance().start(worker)
@@ -690,7 +691,8 @@ class ReplayScreen(QWidget):
         self._tag({"heard": "HEARD", "not heard": "NOT HEARD"}.get(story.mark, "UNSURE"), colour)
         self.headline.setText(f"<span style='color:{colour}'>{story.headline}</span>")
         packets = self._item.obs.n_decoded_frames if self._item is not None else 0
-        extra = (f"  The station also decoded {packets} data packet{'s' if packets != 1 else ''} from this pass: "
+        extra = ("  Open Messages to see what it sent." if packets and "decoded" in story.sentence else
+                 f"  The station also decoded {packets} data packet{'s' if packets != 1 else ''} from this pass: "
                  f"open Messages to see what it sent." if packets and story.mark != "not heard" else "")
         self.sentence.setText(story.sentence + extra)
         self.dots.set(story.dots, colour)
@@ -1159,6 +1161,40 @@ class LauncherScreen(StarryScreen):
         outer.addStretch(1)
 
 
+class ScrollingStack(QStackedWidget):
+    """A stack whose screens scroll when the window is smaller than they are.
+
+    Each screen sits in its own frameless scroll area, so the window fits a
+    1366 x 768 laptop; callers still add, show and ask for the screens
+    themselves, never the scroll areas.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._areas: dict[QWidget, QScrollArea] = {}
+
+    def addWidget(self, screen: QWidget) -> int:  # noqa: N802 - Qt naming
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        area.setStyleSheet("QScrollArea { background: transparent; border: 0; }")
+        area.setWidget(screen)
+        self._areas[screen] = area
+        return super().addWidget(area)
+
+    def setCurrentWidget(self, screen: QWidget) -> None:  # noqa: N802
+        super().setCurrentWidget(self._areas.get(screen, screen))
+
+    def _screen(self, widget):
+        return widget.widget() if isinstance(widget, QScrollArea) else widget
+
+    def currentWidget(self):  # noqa: N802
+        return self._screen(super().currentWidget())
+
+    def widget(self, index: int):
+        return self._screen(super().widget(index))
+
+
 class MissionWindow(QMainWindow):
     """The app: the launcher and the live half (how it works, home, replay, how good is the AI)."""
 
@@ -1171,7 +1207,8 @@ class MissionWindow(QMainWindow):
         self.setWindowTitle("Satellite Signal Analyser")
         self.resize(1440, 880)
         self.setStyleSheet(STYLE)
-        self.stack = QStackedWidget()
+        self.stack = ScrollingStack()
+        self.setMinimumSize(960, 600)        # smaller screens scroll instead of pushing the window off screen
         self.launcher = LauncherScreen()
         self.intro = IntroScreen()
         names = (lambda obs: explainer.catalog.name(int(obs.norad_cat_id or 0))) if explainer is not None else None

@@ -47,3 +47,21 @@ def test_physics_confirming_the_scheduled_satellite():
 def test_unsure_says_so_and_why():
     story = tell(item(0.5), explanation("unknown", share=0.1), "ORESAT")
     assert story.mark == "unsure" and story.symbol == "?" and "no known" in story.sentence and story.dots == 1
+
+
+def decoded_item(p: float, frames: int = 3) -> Item:
+    obs = Observation.from_api({"id": 2, "norad_cat_id": 5, "demoddata": [{"payload_demod": "x"}] * frames})
+    return Item(obs, p, POLICY.verdict(p, obs.n_decoded_frames), np.zeros(len(FEATURES)))
+
+
+def test_decoded_packets_are_proof_whatever_the_picture_says():
+    assert POLICY.verdict(0.05, decoded_frames=2) is POLICY.verdict(0.99)        # signal
+    assert POLICY.verdict(0.05) is not POLICY.verdict(0.05, decoded_frames=1)
+    it = decoded_item(0.05)
+    assert it.decoded and it.verdict.value == "signal"
+
+
+def test_decoded_packets_win_over_a_ground_or_other_satellite_track():
+    for source in ("ground", "other"):
+        story = tell(decoded_item(0.3), explanation(source), "ORESAT")
+        assert story.mark == "heard" and "decoded 3 data packets" in story.sentence and story.dots == 5

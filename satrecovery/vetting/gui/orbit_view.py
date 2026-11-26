@@ -49,14 +49,32 @@ class OrbitWorker(QRunnable):
         super().__init__()
         self.signals = _Signals()
         self._explainer, self._obs, self._power = explainer, obs, power
+        self.finished = False     # set when the result has been sent; the owner may then let go of it
+
+    @staticmethod
+    def prune(workers: list["OrbitWorker"]) -> list["OrbitWorker"]:
+        """The workers still running.  Owners keep a reference only until then: each holds a waterfall."""
+        return [worker for worker in workers if not worker.finished]
 
     def run(self) -> None:
         try:
-            self.signals.done.emit(self._obs.id, self._explainer.explain(self._obs, self._power))
+            result = self._explainer.explain(self._obs, self._power)
         except (OrbitError, OSError, ValueError) as error:
-            self.signals.failed.emit(self._obs.id, str(error))
+            self._send(self.signals.failed, str(error))
         except Exception as error:  # noqa: BLE001 - a background failure must not take the window down
-            self.signals.failed.emit(self._obs.id, f"{type(error).__name__}: {error}")
+            self._send(self.signals.failed, f"{type(error).__name__}: {error}")
+        else:
+            self._send(self.signals.done, result)
+        finally:
+            self._power = None
+            self.finished = True
+
+    def _send(self, signal, value) -> None:
+        """Report back, unless the window closed while this was running: then there is no one to tell."""
+        try:
+            signal.emit(self._obs.id, value)
+        except RuntimeError:          # "Signal source has been deleted"
+            pass
 
 
 # ----------------------------------------------------------------------
@@ -203,7 +221,7 @@ class OrbitPanel(QWidget):
         worker = OrbitWorker(self._explainer, obs, power)
         worker.signals.done.connect(self._done)
         worker.signals.failed.connect(self._failed)
-        self._workers.append(worker)
+        self._workers = OrbitWorker.prune(self._workers) + [worker]
         self._pool.start(worker)
 
     def wait(self, ms: int = 30000) -> bool:

@@ -139,7 +139,7 @@ class TrustCheck:
         excess = np.maximum(psd - noise, 0.0)
         # Read only on a clearly strong signal: measured on the simulator, below
         # about 85% signal the noise itself makes the signal look wider.
-        if excess.sum() < CLEAR_SIGNAL * psd.sum():
+        if excess.sum() <= 0 or excess.sum() < CLEAR_SIGNAL * psd.sum():     # silence, or too weak
             return None
         centre = float(np.sum(freqs * excess) / excess.sum())
         distance = np.abs(freqs - centre)
