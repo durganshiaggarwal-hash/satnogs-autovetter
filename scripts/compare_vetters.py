@@ -20,6 +20,12 @@ Reported for each: accuracy, balanced accuracy, AUROC, calibration error
 (ECE), the share it can decide alone at 5% and 10% error (the original
 project's RiskCoverageCurve), and training time.  Writes
 ``outputs/vetting/model_comparison.json`` and ``.png``.
+
+The JSON also keeps every recording's held-out score from every model,
+with the volunteer's answer and the pass details (elevation, transmitter
+type, decoded packets, station position where known), so the app can
+draw its report card -- confusion matrix, calibration, heatmaps, the
+mistakes -- for any model in any run.
 """
 
 from __future__ import annotations
@@ -100,6 +106,35 @@ def summary(p: np.ndarray, y: np.ndarray) -> dict:
             "auroc": float(roc_auc_score(y, p)), "ece": float(CalibrationReport(confidence, correct, n_bins=10).ece),
             "decide_alone_5pc": float(curve.coverage_at_risk(0.05)),
             "decide_alone_10pc": float(curve.coverage_at_risk(0.10)), "_curve": curve}
+
+
+def per_recording(kept, y: np.ndarray, scores: dict, data: Path) -> dict:
+    """Every recording's held-out score from every model, with what the report card needs to slice it."""
+    try:
+        sites = json.loads((data / "catalog" / "stations.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        sites = {}
+
+    def site(obs, key):
+        if key == "lat" and obs.station_lat is not None:
+            return round(float(obs.station_lat), 3)
+        if key == "lng" and obs.station_lng is not None:
+            return round(float(obs.station_lng), 3)
+        entry = sites.get(str(obs.ground_station))
+        return round(float(entry[key]), 3) if entry else None
+
+    return {
+        "id": [int(o.id) for o in kept],
+        "label": [int(v) for v in y],
+        "station": [int(o.ground_station) if o.ground_station is not None else -1 for o in kept],
+        "elevation": [round(float(o.max_altitude_deg), 1) if o.max_altitude_deg is not None else None for o in kept],
+        "mode": [o.transmitter_mode or "unknown" for o in kept],
+        "decoded": [int(o.n_decoded_frames or 0) for o in kept],
+        "norad": [int(o.norad_cat_id or 0) for o in kept],
+        "lat": [site(o, "lat") for o in kept],
+        "lng": [site(o, "lng") for o in kept],
+        "scores": {name: [round(float(v), 4) for v in s] for name, s in scores.items()},
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -183,8 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     (out / f"{args.name}.json").write_text(json.dumps({
         "n": int(len(y)), "stations": int(len(set(groups.tolist()))), "folds": args.folds,
         "epochs": args.epochs, "limit": args.limit, "seed": args.seed,
-        "finished": time.strftime("%Y-%m-%d %H:%M"), "results": clean, "curves": curves}, indent=2),
-        encoding="utf-8")
+        "finished": time.strftime("%Y-%m-%d %H:%M"), "results": clean, "curves": curves,
+        "per_recording": per_recording(kept, y, scores, data)}), encoding="utf-8")
 
     fig, (left, right) = plt.subplots(1, 2, figsize=(12, 4.8))
     names = list(args.models)

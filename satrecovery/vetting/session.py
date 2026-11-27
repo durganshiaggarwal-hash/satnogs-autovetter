@@ -412,6 +412,11 @@ class VettingSession:
     def __len__(self) -> int:
         return len(self._items)
 
+    @property
+    def cache_root(self) -> Path:
+        """The folder the recordings are kept in (``satrecovery_data/satnogs``)."""
+        return Path(self._cache.root)
+
     def item(self, obs_id: int) -> Item:
         return self._by_id[obs_id]
 

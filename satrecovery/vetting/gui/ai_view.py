@@ -7,6 +7,8 @@ saw during training (whole stations held out, five folds).  This screen
 * shows the model the app uses, in four plain numbers;
 * lays all the models side by side in a table (best in each column marked)
   and in two charts (overall scores; how much each can decide alone);
+* shows a report card for any model (confusion, calibration, heatmaps,
+  mistakes, stations) from its held-out answers on every recording;
 * trains and compares them again, as a quick trial or a full run, in a
   separate process so the window stays responsive.  Runs started here are
   kept in ``satrecovery_data/satnogs/comparisons`` and never overwrite the
@@ -45,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from . import theme
 from .backdrop import StarryScreen, count_up
+from .report_card import RecordingResults, ReportCard
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "compare_vetters.py"
@@ -112,6 +115,7 @@ class Run:
         self.n, self.folds, self.limit = data.get("n", 0), data.get("folds", 0), data.get("limit", 0)
         self.results: dict = data.get("results", {})
         self.curves: dict = data.get("curves", {})
+        self.per_recording: dict = data.get("per_recording") or {}
         self.finished = data.get("finished") or time.strftime("%Y-%m-%d %H:%M", time.localtime(path.stat().st_mtime))
 
     @property
@@ -129,11 +133,19 @@ class Run:
         values = [self.results[m][key] for m in models]
         return models[int(np.argmax(values) if higher else np.argmin(values))]
 
+    def recording_results(self, model: str) -> RecordingResults | None:
+        """One model's answer on every recording, if this run kept them."""
+        try:
+            return RecordingResults(self.per_recording, model) if self.per_recording else None
+        except (KeyError, ValueError):
+            return None
+
 
 class ModelBoard(StarryScreen):
     """The 'How good is the AI?' screen."""
 
     back = Signal()
+    open_recording = Signal(int)
 
     def __init__(self, in_use: str = "cnn+forest", runs_dir: Path | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -240,6 +252,21 @@ class ModelBoard(StarryScreen):
         chart_box.addWidget(self.chart_note)
         board.addWidget(chart_card, 0, 2, 1, 2)
         outer.addLayout(board, 1)
+        outer.addSpacing(6)
+
+        # The report card: one model's held-out answers, sliced six ways
+        report_card, report_box = _card()
+        row = QHBoxLayout()
+        self.report_title = _label("REPORT CARD", "caps", wrap=False)
+        row.addWidget(self.report_title)
+        row.addStretch(1)
+        row.addWidget(_label("pick a model in the table to see its report card", "body", wrap=False))
+        report_box.addLayout(row)
+        self.report = ReportCard()
+        self.report.open_recording.connect(self.open_recording.emit)
+        self.report.setMinimumHeight(420)
+        report_box.addWidget(self.report, 1)
+        outer.addWidget(report_card)
         outer.addSpacing(6)
 
         # Train and compare
@@ -364,6 +391,15 @@ class ModelBoard(StarryScreen):
         self._fill_stats()
         self._fill_table()
         self._draw()
+        self._fill_report()
+
+    def _fill_report(self) -> None:
+        run = self._run
+        if run is None:
+            return
+        model = self._focus or (self._in_use if self._in_use in run.results else run.best("auroc", True))
+        self.report_title.setText(f"REPORT CARD  ·  {NAMES.get(model, model).upper()}")
+        self.report.show_results(run.recording_results(model))
 
     # -- the four numbers --------------------------------------------------
     def _fill_stats(self) -> None:
@@ -422,6 +458,7 @@ class ModelBoard(StarryScreen):
         if self._focus:
             self.chart_note.setText(f"{NAMES[self._focus]}: {KINDS[self._focus]}.")
         self._draw()
+        self._fill_report()
 
     # -- the charts -----------------------------------------------------------
     def set_chart(self, name: str) -> None:

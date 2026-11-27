@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 
+import numpy as np
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -71,3 +72,46 @@ class TestModelBoard:
         assert widget.charts.currentWidget() is widget.alone_plot
         widget.table.selectRow(0)
         assert widget._focus == "forest"
+
+
+def _per_recording():
+    # 6 recordings: two stations, two transmitter types, low and high passes
+    return {"id": [1, 2, 3, 4, 5, 6], "label": [1, 1, 0, 0, 1, 0], "station": [7, 7, 7, 8, 8, 8],
+            "elevation": [10.0, 70.0, 15.0, 65.0, 30.0, None], "mode": ["FM", "FM", "FM", "CW", "CW", "CW"],
+            "decoded": [0, 0, 0, 0, 3, 0], "norad": [1] * 6, "lat": [50.0] * 3 + [None] * 3,
+            "lng": [5.0] * 3 + [None] * 3,
+            "scores": {"forest": [0.9, 0.4, 0.95, 0.05, 0.2, 0.5]}}
+
+
+class TestRecordingResults:
+    def test_confusion_uses_the_apps_rules(self):
+        from satrecovery.vetting.gui.report_card import RecordingResults
+
+        r = RecordingResults(_per_recording(), "forest")
+        table = r.confusion()
+        # rec 1: signal, sure -> heard; rec 2: signal, 0.4 -> unsure; rec 5: decoded packets -> heard
+        assert table[0].tolist() == [2, 0, 1]
+        # rec 3: no signal but 0.95 -> heard (wrong); rec 4: 0.05 -> not heard; rec 6: 0.5 -> unsure
+        assert table[1].tolist() == [1, 1, 1]
+        assert table.sum() == len(r) == 6
+
+    def test_mistakes_are_most_confident_first_and_slices_count_right(self):
+        from satrecovery.vetting.gui.report_card import RecordingResults
+
+        r = RecordingResults(_per_recording(), "forest")
+        assert [int(r.ids[i]) for i in r.mistakes()][:2] == [3, 5]      # 0.95 wrong, then 0.2 wrong
+        modes, accuracy, count = r.heatmap()
+        assert modes == ["FM", "CW"] and count.sum() == 5                 # rec 6 has no elevation
+        assert np.isnan(accuracy).all()                                   # too few per cell to show
+        assert [s[3] for s in r.stations()] == [3]                       # station 8 has no position
+
+    def test_reliability_bins_cover_every_recording(self):
+        from satrecovery.vetting.gui.report_card import RecordingResults
+
+        r = RecordingResults(_per_recording(), "forest")
+        assert sum(n for *_, n in r.reliability()) == 6
+
+    def test_a_run_without_per_recording_results_shows_a_note(self, board):
+        widget, _ = board
+        assert widget._run.recording_results("forest") is None
+        assert "no per-recording results" in widget.report.note.text()

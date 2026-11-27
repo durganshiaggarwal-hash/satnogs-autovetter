@@ -21,6 +21,8 @@ satrecovery_data/satnogs/*
 satrecovery_data/satnogs/comparisons/*
 !satrecovery_data/satnogs/comparisons/run_20261125_1841_full.json
 !satrecovery_data/satnogs/comparisons/run_20261125_1841_full.png
+!satrecovery_data/satnogs/comparisons/run_20261127_1138_full.json
+!satrecovery_data/satnogs/comparisons/run_20261127_1138_full.png
 
 # Private paperwork with personal details
 PROJECT_WRITE_UP.doc

@@ -1230,8 +1230,10 @@ class MissionWindow(QMainWindow):
         self.home.replay.connect(self.open_replay)
         self.home.ai.connect(lambda: self.stack.setCurrentWidget(self.ai))
         self.ai.back.connect(lambda: self.stack.setCurrentWidget(self.home))
+        self.ai.open_recording.connect(self.open_any)
         self.home.refresh_requested.connect(self.fetch_newest)
-        self.replay.back.connect(lambda: self.stack.setCurrentWidget(self.home))
+        self._replay_from = self.home
+        self.replay.back.connect(lambda: self.stack.setCurrentWidget(self._replay_from))
 
         # New recordings from the feed: score them, then redraw at most a few times a second.
         self._redraw = QTimer(self)
@@ -1292,8 +1294,51 @@ class MissionWindow(QMainWindow):
         super().closeEvent(event)
 
     def open_replay(self, obs_id: int) -> None:
+        current = self.stack.currentWidget()
+        self._replay_from = current if current in (self.home, self.ai) else self.home
         self.stack.setCurrentWidget(self.replay)
         self.replay.load(obs_id)
+
+    def open_any(self, obs_id: int) -> bool:
+        """Replay any saved recording, e.g. a mistake from the report card, even if it is not on the home screen."""
+        known = {i.obs.id for i in self._session.all_items}
+        if obs_id not in known:
+            from .. import Manifest
+
+            root = self._session.cache_root
+            found = []
+            for name in ("manifest.jsonl", "latest.jsonl", "unvetted.jsonl"):
+                if (root / name).exists():
+                    found = [o for o in Manifest(root / name) if o.id == obs_id]
+                    if found:
+                        break
+            if not found:
+                found = self._fetch_observation(obs_id)       # not saved here (e.g. a copy without the data)
+            try:
+                for obs in found:
+                    self._session._cache.waterfall(obs)        # downloads it if it is not on this computer
+                added = self._session.add(found) if found else []
+            except Exception:  # noqa: BLE001 - no network, or SatNOGS no longer has it
+                added = []
+            if not added:
+                self.ai.status.setText(f"Recording #{obs_id} cannot be replayed here: its waterfall is not on this "
+                                       "computer and could not be downloaded.")
+                return False
+        self.open_replay(obs_id)
+        return True
+
+    @staticmethod
+    def _fetch_observation(obs_id: int) -> list:
+        """One observation's details from the SatNOGS API, or nothing."""
+        from ..frames import OBSERVATION_URL
+        from ..observation import Observation
+        from ..source import UrllibTransport
+
+        try:
+            response = UrllibTransport().get(OBSERVATION_URL.format(obs_id), timeout=15)
+            return [Observation.from_api(response.json())] if response.status == 200 else []
+        except Exception:  # noqa: BLE001
+            return []
 
     def open_expert(self, obs_id: int | None) -> None:
         from .window import VettingWindow

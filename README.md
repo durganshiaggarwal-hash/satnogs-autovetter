@@ -227,6 +227,10 @@ This gives an independent ground truth: a pass with decoded frames certainly con
   The verdict and its reasons are revealed at the end.
 - **How good is the AI.** The model-comparison table, scores and risk-coverage charts, and a launcher
   that runs `compare_vetters.py` as a `QProcess` and parses its progress.
+- **Report card.** For any model, from its station-held-out answer on every recording: a confusion matrix
+  under the app's abstention policy, a reliability diagram, an accuracy heatmap by transmitter type and pass
+  elevation, accuracy and coverage against elevation, the most confident mistakes (double-click to replay),
+  and a world map of ground stations coloured by accuracy.
 
 Implementation notes: all custom views are drawn with `QPainter` (no web views); charts use pyqtgraph;
 animation timers run only while their widget is visible; network I/O and training run off the GUI
