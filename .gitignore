@@ -11,6 +11,8 @@ satrecovery_data/models/*
 !satrecovery_data/models/vetter_bundle.json
 !satrecovery_data/models/vetter_bundle.npz
 !satrecovery_data/models/vetter_bundle.pt
+!satrecovery_data/models/vetter_cnn.pt
+!satrecovery_data/models/vetter_cnn.json
 !satrecovery_data/models/classifier.json
 !satrecovery_data/models/classifier.pt
 !satrecovery_data/satnogs/
