@@ -103,7 +103,7 @@ happen: the points do not land on the rings.
 **Once: train the AI classifier** (a few minutes on the RTX GPU):
 
 ```
-python scripts\train_classifier.py "C:\Users\chour\Downloads\RML24_IQdata"
+python scripts\train_classifier.py "C:\path\to\RML24_IQdata"
 ```
 
 It prints the accuracy after every pass, then tests on recordings it
@@ -117,7 +117,7 @@ never saw, and saves:
 **Every time: open the app**
 
 ```
-python -m satrecovery.analysis --rml24 "C:\Users\chour\Downloads\RML24_IQdata"
+python -m satrecovery.analysis --rml24 "C:\path\to\RML24_IQdata"
 ```
 
 Without `--rml24`, the Simulated tab still works.
